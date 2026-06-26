@@ -1,0 +1,54 @@
+/* Theme-aware utility classes for consistent light/dark mode support */
+
+/* Main container background */
+.theme-bg-primary {
+    @apply bg-white dark:bg-background-dark;
+}
+
+.theme-bg-secondary {
+    @apply bg-slate-50 dark:bg-[#1a2130];
+}
+
+.theme-bg-tertiary {
+    @apply bg-slate-100 dark:bg-[#232b3d];
+}
+
+/* Card/Panel backgrounds */
+.theme-card {
+    @apply bg-white dark:bg-[#1a2130];
+}
+
+.theme-card-dark {
+    @apply bg-slate-50 dark:bg-[#101622];
+}
+
+/* Text colors */
+.theme-text-primary {
+    @apply text-slate-900 dark:text-white;
+}
+
+.theme-text-secondary {
+    @apply text-slate-600 dark:text-slate-400;
+}
+
+.theme-text-tertiary {
+    @apply text-slate-500 dark:text-slate-500;
+}
+
+/* Borders */
+.theme-border {
+    @apply border-slate-200 dark:border-[#232b3d];
+}
+
+.theme-border-light {
+    @apply border-slate-100 dark:border-[#232b3d]/50;
+}
+
+/* Hover states */
+.theme-hover {
+    @apply hover:bg-slate-50 dark:hover:bg-[#151b29];
+}
+
+.theme-hover-card {
+    @apply hover:bg-slate-100 dark:hover:bg-[#242b3d];
+}

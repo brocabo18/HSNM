@@ -1,0 +1,51 @@
+# Environment & Secrets
+.env
+.env.local
+.env.production
+
+# Local XAMPP / migration scripts (not needed on server)
+null
+query
+add_date_issued_column.php
+add_ics_columns.php
+add_ms_office_email_column.php
+check_db_sync.php
+check_deleted_ips.php
+checker.php
+create_ics_table_fix.php
+create_office_table.php
+db_migration_script.php
+find_duplicates.php
+fix_ics_department_column.php
+fix_schema.php
+import_office_from_computers.php
+migrate_data.php
+migrate_os_key.php
+rename_department_column.php
+run_add_entry.php
+run_endpoint_secure_migration.php
+run_ms_office_update.php
+run_permission_migration.php
+setup_changelog.php
+setup_ihoms_links.php
+setup_pabx.php
+setup_printers.php
+test_version.php
+verify_ips_schema.php
+verify_sync_logic.php
+info.php
+update_ics_schema.php
+update_ics_department.php
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log

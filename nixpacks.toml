@@ -1,0 +1,12 @@
+[phases.setup]
+nixPkgs = ["php83", "php83Extensions.pdo", "php83Extensions.pdo_pgsql", "php83Extensions.pgsql", "php83Extensions.mbstring", "php83Extensions.openssl", "php83Extensions.curl", "php83Extensions.session", "apache-httpd"]
+
+[phases.build]
+cmds = [
+  "cp apache.conf /etc/apache2/sites-available/000-default.conf",
+  "a2enmod rewrite",
+  "a2enmod headers"
+]
+
+[start]
+cmd = "apache2-foreground"
