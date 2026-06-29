@@ -2,11 +2,10 @@ FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ── Install Apache + PHP from Debian repos ─────────────────────────────────
-# Using debian packages instead of php:8.2-apache because the official image
-# has a persistent MPM conflict. The libapache2-mod-php8.2 Debian package
-# automatically runs a2dismod mpm_event && a2enmod mpm_prefork in its
-# postinstall script — guaranteed correct MPM configuration.
+# ── Install Apache + PHP ───────────────────────────────────────────────────
+# libapache2-mod-php8.2 postinstall automatically runs:
+#   a2dismod mpm_event && a2enmod mpm_prefork
+# which is the only reliable way to fix the MPM conflict.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         apache2 \
         php8.2 \
@@ -35,17 +34,9 @@ RUN rm -f /var/www/html/Dockerfile \
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html
 
-# ── Startup: apply Railway's dynamic $PORT to Apache ──────────────────────
-RUN printf '#!/bin/sh\n\
-PORT=${PORT:-80}\n\
-echo "[start.sh] Configuring Apache on port $PORT"\n\
-# Update ports.conf\n\
-sed -i "s/Listen 80/Listen $PORT/g" /etc/apache2/ports.conf\n\
-# Update VirtualHost port in site config\n\
-sed -i "s/<VirtualHost \\*:80>/<VirtualHost *:$PORT>/g" /etc/apache2/sites-available/000-default.conf\n\
-echo "[start.sh] Starting Apache..."\n\
-exec apache2ctl -D FOREGROUND\n' > /usr/local/bin/start.sh \
-    && chmod +x /usr/local/bin/start.sh
+# ── Startup script (COPY avoids printf escape issues) ─────────────────────
+COPY start.sh /usr/local/bin/start.sh
+RUN chmod +x /usr/local/bin/start.sh
 
 EXPOSE 80
 
