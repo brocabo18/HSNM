@@ -1,40 +1,51 @@
-FROM php:8.2-apache
+FROM debian:bookworm-slim
 
-# Install PostgreSQL + other PHP extensions
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set Apache environment variables directly — avoids sourcing /etc/apache2/envvars at runtime
+ENV APACHE_RUN_USER=www-data
+ENV APACHE_RUN_GROUP=www-data
+ENV APACHE_LOG_DIR=/var/log/apache2
+ENV APACHE_RUN_DIR=/var/run/apache2
+ENV APACHE_LOCK_DIR=/var/lock/apache2
+ENV APACHE_PID_FILE=/var/run/apache2/apache2.pid
+ENV APACHE_CONFDIR=/etc/apache2
+
+# ── Install Apache + PHP ───────────────────────────────────────────────────
+# libapache2-mod-php8.2 postinstall automatically switches MPM to prefork
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq-dev \
-        libonig-dev \
-        libzip-dev \
-        zip \
-        unzip \
-    && docker-php-ext-install pdo pdo_pgsql mbstring zip \
-    && rm -rf /var/lib/apt/lists/*
+        apache2 \
+        php8.2 \
+        php8.2-pgsql \
+        php8.2-mbstring \
+        php8.2-zip \
+        php8.2-curl \
+        php8.2-xml \
+        libapache2-mod-php8.2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && a2enmod rewrite headers \
+    && echo "ServerName localhost" >> /etc/apache2/apache2.conf
 
-# Enable Apache modules
-RUN a2enmod rewrite headers
+# ── Pre-create Apache runtime directories ──────────────────────────────────
+RUN mkdir -p /var/run/apache2 /var/lock/apache2 /var/log/apache2
 
-# Set ServerName to suppress FQDN warning
-RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
-
-# Copy Apache site config
+# ── Apache config ──────────────────────────────────────────────────────────
 COPY apache.conf /etc/apache2/sites-available/000-default.conf
 
-# Copy app files
+# ── Copy app files ─────────────────────────────────────────────────────────
 COPY . /var/www/html/
 
-# Remove deployment-only files
 RUN rm -f /var/www/html/Dockerfile \
           /var/www/html/nixpacks.toml \
           /var/www/html/railway.toml \
           /var/www/html/.env.example \
           /var/www/html/start.sh
 
-# Fix permissions
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html
 
-# Write start script directly in Dockerfile (avoids Windows \r\n line ending issues)
-RUN printf '#!/bin/sh\nPORT=${PORT:-80}\necho "[HSNM] Starting on port $PORT"\nsed -i "s/Listen 80/Listen $PORT/g" /etc/apache2/ports.conf\nsed -i "s/<VirtualHost \\*:80>/<VirtualHost *:$PORT>/g" /etc/apache2/sites-available/000-default.conf\nexec apache2-foreground\n' > /start.sh \
+# ── Startup: adjust PORT and launch Apache ─────────────────────────────────
+RUN printf '#!/bin/sh\nPORT=${PORT:-80}\necho "[HSNM] Port: $PORT"\nsed -i "s/Listen 80/Listen $PORT/g" /etc/apache2/ports.conf\nsed -i "s/<VirtualHost \\*:80>/<VirtualHost *:$PORT>/g" /etc/apache2/sites-available/000-default.conf\nexec apache2 -D FOREGROUND\n' > /start.sh \
     && chmod +x /start.sh
 
 EXPOSE 80
