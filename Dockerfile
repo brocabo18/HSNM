@@ -1,34 +1,23 @@
-FROM php:8.2-apache
+FROM debian:bookworm-slim
 
-# ── Install system libraries + PHP extensions ──────────────────────────────
-# Consolidate into ONE RUN to avoid layer caching issues and ensure ordering
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Install Apache + PHP from Debian repos ─────────────────────────────────
+# Using debian packages instead of php:8.2-apache because the official image
+# has a persistent MPM conflict. The libapache2-mod-php8.2 Debian package
+# automatically runs a2dismod mpm_event && a2enmod mpm_prefork in its
+# postinstall script — guaranteed correct MPM configuration.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq-dev \
-        libonig-dev \
-        libzip-dev \
-        zip \
-        unzip \
-    && docker-php-ext-install pdo pdo_pgsql pgsql mbstring zip \
+        apache2 \
+        php8.2 \
+        php8.2-pgsql \
+        php8.2-mbstring \
+        php8.2-zip \
+        php8.2-curl \
+        php8.2-xml \
+        libapache2-mod-php8.2 \
     && rm -rf /var/lib/apt/lists/* \
-    \
-    # ── Fix Apache MPM conflict ──────────────────────────────────────────
-    # Use a glob to remove ALL mpm_* symlinks — explicit filenames miss
-    # some files present in the base image, causing "More than one MPM loaded"
-    && rm -f /etc/apache2/mods-enabled/mpm_*.conf \
-             /etc/apache2/mods-enabled/mpm_*.load \
-    \
-    # ── Ensure mpm_prefork is configured (NOT .load — it is statically compiled) ──
-    # Creating mpm_prefork.load would load it a 2nd time and crash Apache
-    && ln -sf /etc/apache2/mods-available/mpm_prefork.conf \
-              /etc/apache2/mods-enabled/mpm_prefork.conf \
-    \
-    # ── Enable rewrite + headers directly (skip a2enmod) ────────────────
-    && ln -sf /etc/apache2/mods-available/rewrite.load \
-              /etc/apache2/mods-enabled/rewrite.load \
-    && ln -sf /etc/apache2/mods-available/headers.load \
-              /etc/apache2/mods-enabled/headers.load \
-    && ln -sf /etc/apache2/mods-available/headers.conf \
-              /etc/apache2/mods-enabled/headers.conf
+    && a2enmod rewrite headers
 
 # ── Apache config ──────────────────────────────────────────────────────────
 COPY apache.conf /etc/apache2/sites-available/000-default.conf
@@ -51,7 +40,7 @@ RUN printf '#!/bin/sh\n\
 PORT=${PORT:-80}\n\
 sed -i "s/Listen 80/Listen $PORT/" /etc/apache2/ports.conf\n\
 sed -i "s/<VirtualHost \\*:80>/<VirtualHost *:$PORT>/" /etc/apache2/sites-available/000-default.conf\n\
-exec apache2-foreground\n' > /usr/local/bin/start.sh \
+exec apache2ctl -D FOREGROUND\n' > /usr/local/bin/start.sh \
     && chmod +x /usr/local/bin/start.sh
 
 EXPOSE 80
