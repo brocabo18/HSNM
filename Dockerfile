@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libzip-dev \
         zip \
         unzip \
-    && docker-php-ext-install pdo pdo_pgsql pgsql mbstring zip \
+    && docker-php-ext-install pdo pdo_pgsql mbstring zip \
     && rm -rf /var/lib/apt/lists/*
 
 # Enable Apache modules
@@ -33,9 +33,9 @@ RUN rm -f /var/www/html/Dockerfile \
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html
 
-# Copy startup script
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
+# Write start script directly in Dockerfile (avoids Windows \r\n line ending issues)
+RUN printf '#!/bin/sh\nPORT=${PORT:-80}\necho "[HSNM] Starting on port $PORT"\nsed -i "s/Listen 80/Listen $PORT/g" /etc/apache2/ports.conf\nsed -i "s/<VirtualHost \\*:80>/<VirtualHost *:$PORT>/g" /etc/apache2/sites-available/000-default.conf\nexec apache2-foreground\n' > /start.sh \
+    && chmod +x /start.sh
 
 EXPOSE 80
 
