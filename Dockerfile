@@ -17,11 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -f /etc/apache2/mods-enabled/mpm_*.conf \
              /etc/apache2/mods-enabled/mpm_*.load \
     \
-    # ── Ensure mpm_prefork is enabled ───────────────────────────────────
+    # ── Ensure mpm_prefork is configured (NOT .load — it is statically compiled) ──
+    # Creating mpm_prefork.load would load it a 2nd time and crash Apache
     && ln -sf /etc/apache2/mods-available/mpm_prefork.conf \
               /etc/apache2/mods-enabled/mpm_prefork.conf \
-    && ln -sf /etc/apache2/mods-available/mpm_prefork.load \
-              /etc/apache2/mods-enabled/mpm_prefork.load \
     \
     # ── Enable rewrite + headers directly (skip a2enmod) ────────────────
     && ln -sf /etc/apache2/mods-available/rewrite.load \
