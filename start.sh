@@ -1,5 +1,4 @@
 #!/bin/sh
-set -e
 
 PORT=${PORT:-80}
 
@@ -18,4 +17,4 @@ echo "[HSNM] Running config test..."
 apache2 -t 2>&1
 
 echo "[HSNM] Starting Apache in foreground..."
-exec apache2 -D FOREGROUND
+exec apache2 -D FOREGROUND 2>&1
