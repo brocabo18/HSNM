@@ -12,14 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     \
     # ── Fix Apache MPM conflict ──────────────────────────────────────────
-    # The php:8.2-apache base image enables mpm_event by default, which
-    # conflicts with mod_php (requires mpm_prefork). We remove the symlinks
-    # directly — a2dismod silently fails so we cannot use it.
-    && rm -f \
-        /etc/apache2/mods-enabled/mpm_event.conf \
-        /etc/apache2/mods-enabled/mpm_event.load \
-        /etc/apache2/mods-enabled/mpm_worker.conf \
-        /etc/apache2/mods-enabled/mpm_worker.load \
+    # Use a glob to remove ALL mpm_* symlinks — explicit filenames miss
+    # some files present in the base image, causing "More than one MPM loaded"
+    && rm -f /etc/apache2/mods-enabled/mpm_*.conf \
+             /etc/apache2/mods-enabled/mpm_*.load \
     \
     # ── Ensure mpm_prefork is enabled ───────────────────────────────────
     && ln -sf /etc/apache2/mods-available/mpm_prefork.conf \
