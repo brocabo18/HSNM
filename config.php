@@ -34,12 +34,13 @@ define('APP_NAME', 'HSNM');
 // On Railway (production) the app is served from the root, so BASE_URL = '/'
 // Locally under XAMPP it runs in /HSNM/
 if (!defined('BASE_URL')) {
-    $isProduction = (getenv('APP_ENV') === 'production' || getenv('RAILWAY_ENVIRONMENT') !== false);
+    // getenv() returns false (bool) when variable is not set at all
+    $isProduction = (getenv('APP_ENV') === 'production' || getenv('RAILWAY_ENVIRONMENT') !== false && getenv('RAILWAY_ENVIRONMENT') !== '');
     if ($isProduction) {
         define('BASE_URL', '/');
     } else {
         $folderName = basename(__DIR__);
-        define('BASE_URL', '/' . rawurlencode($folderName) . '/');
+        define('BASE_URL', '/' . rawurlencode($folderName));
     }
 }
 
@@ -48,6 +49,7 @@ error_reporting(E_ALL);
 ini_set('display_errors', 0);
 
 // Database Connection
+$pdo = null;
 try {
     $pdo = new PDO(
         "pgsql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME,
@@ -57,11 +59,16 @@ try {
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
-            PDO::ATTR_PERSISTENT => false  // Disable persistent connections on cloud hosting
+            PDO::ATTR_PERSISTENT => false
         ]
     );
 } catch (PDOException $e) {
-    die("Database Connection Error: " . $e->getMessage());
+    // Don't die() — that kills PHP before Apache can respond to health checks
+    // Instead serve a proper 503 so Railway health check gets a response
+    $dbError = $e->getMessage();
+    if (!defined('DB_ERROR')) define('DB_ERROR', $dbError);
+    // Log the real error server-side
+    error_log("Database Connection Error: " . $dbError);
 }
 
 // Session Management
