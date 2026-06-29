@@ -4,6 +4,7 @@ FROM php:8.2-apache
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     libzip-dev \
+    libonig-dev \
     zip \
     unzip \
     && docker-php-ext-install \
@@ -23,7 +24,7 @@ COPY apache.conf /etc/apache2/sites-available/000-default.conf
 # Copy all application files to Apache web root
 COPY . /var/www/html/
 
-# Remove Dockerfile and deployment config from web root (not needed at runtime)
+# Remove deployment-only files from web root
 RUN rm -f /var/www/html/Dockerfile \
     /var/www/html/nixpacks.toml \
     /var/www/html/railway.toml \
@@ -33,4 +34,14 @@ RUN rm -f /var/www/html/Dockerfile \
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html
 
+# Startup script: make Apache use Railway's $PORT
+RUN echo '#!/bin/bash\n\
+PORT=${PORT:-80}\n\
+sed -i "s/Listen 80/Listen $PORT/" /etc/apache2/ports.conf\n\
+sed -i "s/<VirtualHost \*:80>/<VirtualHost *:$PORT>/" /etc/apache2/sites-available/000-default.conf\n\
+exec apache2-foreground' > /usr/local/bin/start.sh \
+    && chmod +x /usr/local/bin/start.sh
+
 EXPOSE 80
+
+CMD ["/usr/local/bin/start.sh"]
