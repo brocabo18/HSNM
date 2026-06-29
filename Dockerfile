@@ -15,8 +15,10 @@ RUN apt-get update && apt-get install -y \
         zip \
     && rm -rf /var/lib/apt/lists/*
 
-# Enable Apache modules
-RUN a2enmod rewrite headers
+# Enable Apache modules and fix MPM conflict
+# php:8.2-apache needs mpm_prefork — disable others to avoid "More than one MPM loaded" error
+RUN a2dismod mpm_event mpm_worker 2>/dev/null || true \
+    && a2enmod mpm_prefork rewrite headers
 
 # Copy custom Apache config
 COPY apache.conf /etc/apache2/sites-available/000-default.conf
