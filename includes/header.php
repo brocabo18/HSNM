@@ -4,9 +4,9 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 // Base URL handling
 if (!defined('BASE_URL')) {
-    $isProduction = (getenv('APP_ENV') === 'production' || getenv('RAILWAY_ENVIRONMENT') !== false);
+    $isProduction = (getenv('APP_ENV') === 'production' || (getenv('RAILWAY_ENVIRONMENT') !== false && getenv('RAILWAY_ENVIRONMENT') !== ''));
     if ($isProduction) {
-        define('BASE_URL', '/');
+        define('BASE_URL', '');
     } else {
         $folderName = basename(dirname(__DIR__)); // Go up one level from includes/
         define('BASE_URL', '/' . rawurlencode($folderName)); // No trailing slash
