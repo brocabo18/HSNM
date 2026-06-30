@@ -36,7 +36,7 @@ COPY . /var/www/html/
 
 # ── Copy and install the startup script ────────────────────────────────────
 COPY start.sh /start.sh
-RUN chmod +x /start.sh
+RUN sed -i 's/\r//' /start.sh && chmod +x /start.sh
 
 # ── Remove files that should not be served ─────────────────────────────────
 RUN rm -f /var/www/html/Dockerfile \
