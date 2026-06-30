@@ -9,7 +9,7 @@ if (!defined('BASE_URL')) {
         define('BASE_URL', '/');
     } else {
         $folderName = basename(dirname(__DIR__)); // Go up one level from includes/
-        define('BASE_URL', '/' . rawurlencode($folderName) . '/');
+        define('BASE_URL', '/' . rawurlencode($folderName)); // No trailing slash
     }
 }
 ?>

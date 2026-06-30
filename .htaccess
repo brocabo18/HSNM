@@ -7,4 +7,4 @@ RewriteCond %{REQUEST_FILENAME}.php -f
 RewriteRule ^([^\.]+)$ $1.php [NC,L]
 
 # Redirect bare root to login
-RewriteRule ^$ /login.php [L,R=302]
+RewriteRule ^$ /HSNM/login.php [L,R=302]

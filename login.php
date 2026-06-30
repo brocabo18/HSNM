@@ -15,6 +15,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password = $_POST['password'] ?? '';
 
         if ($username && $password) {
+            if (!$pdo) {
+                $error = "Database is unavailable. Please try again later.";
+            } else {
             try {
                 $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? AND is_active = true LIMIT 1");
                 $stmt->execute([$username]);
@@ -37,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } catch (Exception $e) {
                 $error = "System error: " . $e->getMessage();
+            }
             }
         } else {
             $error = "Please enter username and password";
@@ -239,7 +243,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
 
         <p class="text-center text-xs text-slate-600 mt-8">
-            &copy; <?= date('Y') ?> IHOMS-MIKE. All rights reserved. <?= getAppVersion($pdo) ?>
+            &copy; <?= date('Y') ?> IHOMS-MIKE. All rights reserved. <?= $pdo ? getAppVersion($pdo) : 'v—' ?>
         </p>
     </div>
 
