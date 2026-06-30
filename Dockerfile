@@ -45,7 +45,13 @@ RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html
 
 # ── Startup: adjust PORT and launch Apache ─────────────────────────────────
-RUN printf '#!/bin/sh\nPORT=${PORT:-80}\necho "[HSNM] Port: $PORT"\nsed -i "s/Listen 80/Listen $PORT/g" /etc/apache2/ports.conf\nsed -i "s/<VirtualHost \\*:80>/<VirtualHost *:$PORT>/g" /etc/apache2/sites-available/000-default.conf\nexec apache2 -D FOREGROUND\n' > /start.sh \
+RUN printf '#!/bin/sh\n\
+PORT=${PORT:-80}\n\
+echo "[HSNM] Port: $PORT"\n\
+sed -i "s/Listen 80/Listen $PORT/g" /etc/apache2/ports.conf\n\
+sed -i "s/<VirtualHost \\*:80>/<VirtualHost *:$PORT>/g" /etc/apache2/sites-available/000-default.conf\n\
+exec apache2ctl -D FOREGROUND\n\
+' > /start.sh \
     && chmod +x /start.sh
 
 EXPOSE 80
