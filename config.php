@@ -54,9 +54,11 @@ ini_set('display_errors', 0);
 // Database Connection
 $pdo = null;
 try {
+    // Neon.tech and many cloud providers require SSL. 
+    // We add sslmode=require to ensure the connection is accepted.
     $pdo = new PDO(
         // connect_timeout=5 ensures fast failure instead of 30s hang when DB unreachable
-        "pgsql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . ";connect_timeout=5",
+        "pgsql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . ";sslmode=require;connect_timeout=5",
         DB_USER,
         DB_PASS,
         [
@@ -66,6 +68,7 @@ try {
             PDO::ATTR_PERSISTENT         => false
         ]
     );
+
 } catch (PDOException $e) {
     // Don't die() — that kills PHP before Apache can respond to health checks
     // Instead serve a proper 503 so Railway health check gets a response

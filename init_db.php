@@ -13,7 +13,7 @@ if (!$dbUrl) {
 
 $parts = parse_url($dbUrl);
 $dsn   = sprintf(
-    'pgsql:host=%s;port=%s;dbname=%s;connect_timeout=10',
+    'pgsql:host=%s;port=%s;dbname=%s;sslmode=require;connect_timeout=10',
     $parts['host'],
     $parts['port'] ?? 5432,
     ltrim($parts['path'], '/')
