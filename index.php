@@ -17,47 +17,55 @@ $stats = [
 ];
 
 try {
+    // Batch standard count queries into a single round-trip query for massive speedup
+    $batch_query = "SELECT 
+        (SELECT COUNT(*) FROM routers) as routers_total,
+        (SELECT COUNT(*) FROM routers WHERE status = 'Online') as routers_online,
+        (SELECT COUNT(*) FROM routers WHERE status = 'Offline') as routers_offline,
+        (SELECT COUNT(*) FROM switches) as switches_total,
+        (SELECT COUNT(*) FROM switches WHERE status = 'Active') as switches_active,
+        (SELECT COUNT(*) FROM switches WHERE status = 'Inactive') as switches_inactive,
+        (SELECT COUNT(*) FROM ips) as ips_total,
+        (SELECT COUNT(*) FROM ips WHERE status = 'active') as ips_active,
+        (SELECT COUNT(*) FROM computers) as computers_total,
+        (SELECT COUNT(*) FROM ics_inventory) as ics_total,
+        (SELECT COUNT(*) FROM office_licenses) as office_total,
+        (SELECT COUNT(*) FROM pabx_directory) as pabx_total,
+        (SELECT COUNT(*) FROM printers) as printers_total,
+        (SELECT COUNT(*) FROM queueing_tvs) as queueing_tv_total
+    ";
+    
+    $counts = $pdo->query($batch_query)->fetch(PDO::FETCH_ASSOC);
+    
     // Routers
-    $stats['routers']['total'] = $pdo->query("SELECT COUNT(*) FROM routers")->fetchColumn();
-    $stats['routers']['online'] = $pdo->query("SELECT COUNT(*) FROM routers WHERE status = 'Online'")->fetchColumn();
-    $stats['routers']['offline'] = $pdo->query("SELECT COUNT(*) FROM routers WHERE status = 'Offline'")->fetchColumn();
+    $stats['routers']['total'] = $counts['routers_total'];
+    $stats['routers']['online'] = $counts['routers_online'];
+    $stats['routers']['offline'] = $counts['routers_offline'];
 
     // Switches
-    $stats['switches']['total'] = $pdo->query("SELECT COUNT(*) FROM switches")->fetchColumn();
-    $stats['switches']['active'] = $pdo->query("SELECT COUNT(*) FROM switches WHERE status = 'Active'")->fetchColumn();
-    $stats['switches']['inactive'] = $pdo->query("SELECT COUNT(*) FROM switches WHERE status = 'Inactive'")->fetchColumn();
+    $stats['switches']['total'] = $counts['switches_total'];
+    $stats['switches']['active'] = $counts['switches_active'];
+    $stats['switches']['inactive'] = $counts['switches_inactive'];
 
     // IPs
-    $stats['ips']['total'] = $pdo->query("SELECT COUNT(*) FROM ips")->fetchColumn();
-    $stats['ips']['active'] = $pdo->query("SELECT COUNT(*) FROM ips WHERE status = 'active'")->fetchColumn();
-    // Simplified available calculation
+    $stats['ips']['total'] = $counts['ips_total'];
+    $stats['ips']['active'] = $counts['ips_active'];
     $stats['ips']['available'] = $stats['ips']['total'] - $stats['ips']['active'];
 
-    // Computers
-    $stats['computers']['total'] = $pdo->query("SELECT COUNT(*) FROM computers")->fetchColumn();
+    // Computers & others
+    $stats['computers']['total'] = $counts['computers_total'];
+    $stats['ics']['total'] = $counts['ics_total'];
+    $stats['office']['total'] = $counts['office_total'];
+    $stats['pabx']['total'] = $counts['pabx_total'];
+    $stats['printers']['total'] = $counts['printers_total'];
+    $stats['queueing_tv']['total'] = $counts['queueing_tv_total'];
 
-    // ICS
-    $stats['ics']['total'] = $pdo->query("SELECT COUNT(*) FROM ics_inventory")->fetchColumn();
-
-    // Office
-    $stats['office']['total'] = $pdo->query("SELECT COUNT(*) FROM office_licenses")->fetchColumn();
-
-    // Reconciliation (Mismatches + Conflicts)
+    // Reconciliation (Mismatches + Conflicts) - Kept separate as they are complex joins
     $mismatch_count = $pdo->query("SELECT COUNT(*) FROM computers c INNER JOIN ips i ON c.control_number = i.control_number WHERE (COALESCE(i.ip_address, '') != COALESCE(c.ip_address, '')) OR (COALESCE(i.mac_address, '') != COALESCE(c.mac_address, ''))")->fetchColumn();
 
     $conflict_count = $pdo->query("SELECT COUNT(*) FROM computers c INNER JOIN ips i ON (i.ip_address = c.ip_address OR i.mac_address = c.mac_address) WHERE (i.control_number != c.control_number) AND ((i.ip_address = c.ip_address AND i.ip_address != '' AND i.ip_address IS NOT NULL AND c.ip_address NOT LIKE '%DHCP%') OR (i.mac_address = c.mac_address AND i.mac_address != '' AND i.mac_address IS NOT NULL))")->fetchColumn();
 
     $stats['reconciliation']['total'] = $mismatch_count + $conflict_count;
-
-    // PABX Directory
-    $stats['pabx']['total'] = $pdo->query("SELECT COUNT(*) FROM pabx_directory")->fetchColumn();
-
-    // Printers
-    $stats['printers']['total'] = $pdo->query("SELECT COUNT(*) FROM printers")->fetchColumn();
-
-    // Queueing TV
-    $stats['queueing_tv']['total'] = $pdo->query("SELECT COUNT(*) FROM queueing_tvs")->fetchColumn();
-
 } catch (PDOException $e) {
     // Handle error silently or log it
 }
