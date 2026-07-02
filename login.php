@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($username && $password) {
             if (!$pdo) {
-                $error = "Database is unavailable. Please try again later.";
+                $error = "Database is unavailable. Error: " . (defined('DB_ERROR') ? DB_ERROR : 'Unknown');
             } else {
             try {
                 $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? AND is_active = true LIMIT 1");
