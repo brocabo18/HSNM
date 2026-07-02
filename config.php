@@ -34,7 +34,11 @@ define('APP_NAME', 'HSNM');
 // Locally under XAMPP it runs in /HSNM/, so BASE_URL = '/HSNM'
 if (!defined('BASE_URL')) {
     // getenv() returns false (bool) when variable is not set at all
-    $isProduction = (getenv('APP_ENV') === 'production' || getenv('RAILWAY_ENVIRONMENT') !== false && getenv('RAILWAY_ENVIRONMENT') !== '');
+    $isProduction = (
+        getenv('APP_ENV') === 'production' || 
+        (getenv('RAILWAY_ENVIRONMENT') !== false && getenv('RAILWAY_ENVIRONMENT') !== '') ||
+        getenv('RENDER') === 'true'
+    );
     if ($isProduction) {
         define('BASE_URL', '');
     } else {
