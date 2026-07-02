@@ -106,10 +106,11 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
 );
 
 -- Queueing TV Table
-CREATE TABLE IF NOT EXISTS queueing_tv (
+CREATE TABLE IF NOT EXISTS queueing_tvs (
     id SERIAL PRIMARY KEY,
-    screen_name VARCHAR(100) NOT NULL,
+    screen_name VARCHAR(100),
     location VARCHAR(200),
+    department VARCHAR(100),
     ip_address VARCHAR(45),
     status VARCHAR(20) DEFAULT 'Active',
     remarks TEXT,
