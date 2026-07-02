@@ -54,11 +54,20 @@ ini_set('display_errors', 0);
 // Database Connection
 $pdo = null;
 try {
-    // Neon.tech and many cloud providers require SSL. 
-    // We add sslmode=require to ensure the connection is accepted.
+    // Neon.tech and cloud providers require SSL, but local XAMPP usually doesn't.
+    $ssl_param = (DB_HOST === 'localhost' || DB_HOST === '127.0.0.1') ? '' : ';sslmode=require';
+    
+    // Neon SNI workaround for older libpq versions (like XAMPP on Windows)
+    $options_param = '';
+    if (strpos(DB_HOST, '.neon.tech') !== false) {
+        $endpoint_id = explode('.', DB_HOST)[0];
+        // For PDO DSN, we use options='endpoint=ID' (not URL-encoded)
+        $options_param = ";options='endpoint=$endpoint_id'";
+    }
+
     $pdo = new PDO(
         // connect_timeout=5 ensures fast failure instead of 30s hang when DB unreachable
-        "pgsql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . ";sslmode=require;connect_timeout=5",
+        "pgsql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . $ssl_param . $options_param . ";connect_timeout=5",
         DB_USER,
         DB_PASS,
         [
@@ -68,6 +77,9 @@ try {
             PDO::ATTR_PERSISTENT         => false
         ]
     );
+
+    // Ensure we are operating in the public schema (required for some connection pools like Neon)
+    $pdo->exec("SET search_path TO public;");
 
 } catch (PDOException $e) {
     // Don't die() — that kills PHP before Apache can respond to health checks

@@ -12,11 +12,21 @@ if (!$dbUrl) {
 }
 
 $parts = parse_url($dbUrl);
+$ssl_param = ($parts['host'] === 'localhost' || $parts['host'] === '127.0.0.1') ? '' : ';sslmode=require';
+
+$options_param = '';
+if (strpos($parts['host'], '.neon.tech') !== false) {
+    $endpoint_id = explode('.', $parts['host'])[0];
+    $options_param = ";options='endpoint=$endpoint_id'";
+}
+
 $dsn   = sprintf(
-    'pgsql:host=%s;port=%s;dbname=%s;sslmode=require;connect_timeout=10',
+    'pgsql:host=%s;port=%s;dbname=%s%s%s;connect_timeout=10',
     $parts['host'],
     $parts['port'] ?? 5432,
-    ltrim($parts['path'], '/')
+    ltrim($parts['path'], '/'),
+    $ssl_param,
+    $options_param
 );
 
 $retries = 5;
@@ -26,6 +36,10 @@ for ($i = 1; $i <= $retries; $i++) {
         $pdo = new PDO($dsn, $parts['user'], $parts['pass'], [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         ]);
+        
+        // Ensure we are operating in the public schema (required for some connection pools like Neon)
+        $pdo->exec("SET search_path TO public;");
+        
         echo "[init_db] Connected to PostgreSQL.\n";
         break;
     } catch (PDOException $e) {
