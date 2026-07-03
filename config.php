@@ -42,7 +42,10 @@ if (!defined('BASE_URL')) {
         getenv('APP_ENV') === 'production' || 
         (getenv('RAILWAY_ENVIRONMENT') !== false && getenv('RAILWAY_ENVIRONMENT') !== '') ||
         getenv('RENDER') === 'true' ||
-        getenv('VERCEL') === '1'
+        getenv('VERCEL') === '1' ||
+        isset($_SERVER['VERCEL']) || 
+        isset($_ENV['VERCEL']) ||
+        isset($_SERVER['HTTP_X_VERCEL_ID'])
     );
     if ($isProduction) {
         define('BASE_URL', '');

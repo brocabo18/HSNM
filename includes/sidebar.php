@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Determine active page based on current path
 $current_path = $_SERVER['REQUEST_URI'] ?? '';
 $active_page = 'dashboard';
