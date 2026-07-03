@@ -11,14 +11,18 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
 // Database Credentials — read from environment variables
 // Railway automatically provides DATABASE_URL for linked PostgreSQL services
 // For local development, set individual DB_* env vars or use the fallbacks below
-if (getenv('DATABASE_URL')) {
-    // Parse Railway's DATABASE_URL: postgresql://user:pass@host:port/dbname
-    $dbUrl = parse_url(getenv('DATABASE_URL'));
+// Support Railway (DATABASE_URL) and Vercel/Neon (POSTGRES_URL / POSTGRES_URL_NON_POOLING)
+$env_db_url = getenv('DATABASE_URL') ?: (getenv('POSTGRES_URL') ?: getenv('POSTGRES_URL_NON_POOLING'));
+
+if ($env_db_url) {
+    // Parse the connection string: postgresql://user:pass@host:port/dbname
+    $dbUrl = parse_url($env_db_url);
     define('DB_HOST', $dbUrl['host']);
     define('DB_PORT', $dbUrl['port'] ?? 5432);
     define('DB_NAME', ltrim($dbUrl['path'], '/'));
-    define('DB_USER', $dbUrl['user']);
-    define('DB_PASS', $dbUrl['pass']);
+    // Passwords on Vercel/Neon often contain special chars and are URL-encoded
+    define('DB_USER', isset($dbUrl['user']) ? urldecode($dbUrl['user']) : '');
+    define('DB_PASS', isset($dbUrl['pass']) ? urldecode($dbUrl['pass']) : '');
 } else {
     define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
     define('DB_PORT', getenv('DB_PORT') ?: 5432);
@@ -37,7 +41,8 @@ if (!defined('BASE_URL')) {
     $isProduction = (
         getenv('APP_ENV') === 'production' || 
         (getenv('RAILWAY_ENVIRONMENT') !== false && getenv('RAILWAY_ENVIRONMENT') !== '') ||
-        getenv('RENDER') === 'true'
+        getenv('RENDER') === 'true' ||
+        getenv('VERCEL') === '1'
     );
     if ($isProduction) {
         define('BASE_URL', '');
@@ -61,6 +66,8 @@ try {
     $options_param = '';
     if (strpos(DB_HOST, '.neon.tech') !== false) {
         $endpoint_id = explode('.', DB_HOST)[0];
+        // If connecting via Vercel pooler, remove the '-pooler' suffix for the SNI endpoint ID
+        $endpoint_id = str_replace('-pooler', '', $endpoint_id);
         // For PDO DSN, we use options='endpoint=ID' (not URL-encoded)
         $options_param = ";options='endpoint=$endpoint_id'";
     }
