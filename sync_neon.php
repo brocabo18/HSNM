@@ -232,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
         <div class="input-group">
             <label for="neon_url">Remote Database Connection URL (Neon.tech or Railway)</label>
-            <input type="password" id="neon_url" value="postgresql://neondb_owner:npg_MOmuRVnI13wE@ep-solitary-dream-ao7p74qo-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require" placeholder="postgresql://user:password@hostname:5432/dbname" autocomplete="off">
+            <input type="password" id="neon_url" value="" placeholder="postgresql://user:password@hostname:5432/dbname" autocomplete="off">
             <div style="font-size: 12px; color: #64748b; margin-top: 8px;">
                 Example: <code>postgresql://neondb_owner:password@ep-lively-tree.us-east-2.aws.neon.tech/neondb?sslmode=require</code>
             </div>
