@@ -28,6 +28,8 @@ elseif (strpos($current_path, '/modules/printers') !== false)
     $active_page = 'printers';
 elseif (strpos($current_path, '/modules/changelog') !== false)
     $active_page = 'changelog';
+elseif (strpos($current_path, '/sync_neon.php') !== false)
+    $active_page = 'data_sync';
 elseif (strpos($current_path, '/modules/reports') !== false)
     $active_page = 'reports';
 elseif (strpos($current_path, '/modules/settings') !== false)
@@ -191,8 +193,15 @@ elseif (strpos($current_path, '/modules/settings') !== false)
                 <?= BASE_URL ?>/modules/changelog/">
                 <span class="material-symbols-outlined text-[17px]">update</span>
                 <span class="text-xs font-medium">Changelog</span> </a>
+        <?php endif; ?>
+
+        <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg <?= $active_page === 'data_sync' ? 'bg-primary/10 text-primary font-bold' : '' ?>" href="<?= BASE_URL ?>/sync_neon.php">
+                <span class="material-symbols-outlined text-[17px]">sync</span>
+                <span class="text-xs font-medium">Data Sync</span>
+            </a>
+        <?php endif; ?>
         </nav>
-    <?php endif; ?>
 
     <div class="mt-auto p-4 border-t border-slate-200 dark:border-[#232b3d] space-y-3">
         <!-- Theme Toggle Button -->
