@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($username && $password) {
             if (!$pdo) {
-                $error = "Database is unavailable. Please try again later.";
+                $error = "Database is unavailable. " . (defined('DB_ERROR') ? DB_ERROR : '');
             } else {
             try {
                 $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? AND is_active = true LIMIT 1");
@@ -139,6 +139,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div
                     class="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-bold text-center">
                     <?= htmlspecialchars($error) ?>
+                </div>
+            <?php elseif (!$pdo): ?>
+                <div
+                    class="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-bold text-center">
+                    Database is offline: <?= defined('DB_ERROR') ? htmlspecialchars(DB_ERROR) : 'Unknown error' ?>
                 </div>
             <?php endif; ?>
 
