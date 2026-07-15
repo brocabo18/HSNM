@@ -65,7 +65,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         'routers'        => ['id', 'last_seen'],
         'switches'       => ['id', 'updated_at'],
         'computers'      => ['id', 'updated_at'],
-        'pabx_directory' => ['id', 'updated_at']
+        'pabx_directory' => ['id', 'updated_at'],
+        'office_licenses'=> ['id', 'created_at'],
+        'ics_inventory'  => ['id', 'updated_at'],
+        'printers'       => ['id', 'updated_at'],
+        'queueing_tvs'   => ['id', 'updated_at'],
+        'ihoms_links'    => ['id', 'updated_at'],
+        'firewall_status'=> ['id', 'updated_at']
     ];
 
     foreach ($tables as $table => $config) {
