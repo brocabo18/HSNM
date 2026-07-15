@@ -69,8 +69,6 @@ try {
     $options_param = '';
     if (strpos(DB_HOST, '.neon.tech') !== false) {
         $endpoint_id = explode('.', DB_HOST)[0];
-        // If connecting via Vercel pooler, remove the '-pooler' suffix for the SNI endpoint ID
-        $endpoint_id = str_replace('-pooler', '', $endpoint_id);
         // For PDO DSN, we use options='endpoint=ID' (not URL-encoded)
         $options_param = ";options='endpoint=$endpoint_id'";
     }
