@@ -1,4 +1,4 @@
-<?php
+﻿﻿<?php
 require_once '../../config.php';
 requireLogin();
 
@@ -245,7 +245,7 @@ $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
 if ($page < 1)
     $page = 1;
 
-$limit_param = $_GET['limit'] ?? '50';
+$limit_param = $_GET['limit'] ?? '15';
 $limit = ($limit_param === 'all') ? 999999 : (int) $limit_param;
 $offset = ($page - 1) * $limit;
 
@@ -426,6 +426,7 @@ require_once '../../includes/sidebar.php';
                 <?php endif; ?>
                 <select name="limit" onchange="this.form.submit()"
                     class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
+                    <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
                     <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
                     <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
                     <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>Show: 200</option>

@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 require_once '../../config.php';
 requireLogin();
 
@@ -1057,7 +1057,7 @@ switch ($sort_by) {
 $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
 if ($page < 1)
     $page = 1;
-$limit_param = $_GET['limit'] ?? '50';
+$limit_param = $_GET['limit'] ?? '15';
 $limit = ($limit_param === 'all') ? 999999 : (int) $limit_param;
 $offset = ($page - 1) * $limit;
 
@@ -1253,6 +1253,7 @@ if (!$is_ajax) {
                     <?php endif; ?>
                     <select name="limit" onchange="this.form.submit()"
                         class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
+                        <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
                         <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
                         <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
                         <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>Show: 200</option>
@@ -1406,39 +1407,7 @@ if (!$is_ajax) {
                         <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
                             MR/PAR</th>
                         <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            System Unit<br>S/N</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            Monitor<br>S/N</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            Mouse<br>S/N</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            Keyboard<br>S/N</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            Printer<br>S/N</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            Scanner<br>S/N</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            AVR/UPS<br>S/N</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            Processor</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            Memory</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            Storage</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            OS</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            OS Key</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            License</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            MS Office</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            MS Office<br>Email</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
                             IP Address</th>
-                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                            MAC</th>
                         <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
                             Endpoint<br>Secure</th>
                         <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
@@ -1459,7 +1428,7 @@ if (!$is_ajax) {
                 <tbody class="divide-y divide-[#232b3d]/50">
                     <?php if (empty($computers)): ?>
                         <tr>
-                            <td colspan="28" class="px-6 py-12 text-center text-slate-500">No computers found.</td>
+                            <td colspan="13" class="px-6 py-12 text-center text-slate-500">No computers found.</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($computers as $item): ?>
@@ -1482,111 +1451,8 @@ if (!$is_ajax) {
                                 <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                     <?= htmlspecialchars($item['mr_par'] ?: '-') ?>
                                 </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <div>
-                                        <?= htmlspecialchars($item['system_unit'] ?: '-') ?>
-                                    </div>
-                                    <div class="text-[9px] text-slate-500 font-mono">
-                                        <?= htmlspecialchars($item['system_unit_sn'] ?: '-') ?>
-                                    </div>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <div>
-                                        <?= htmlspecialchars($item['monitor'] ?: '-') ?>
-                                    </div>
-                                    <div class="text-[9px] text-slate-500 font-mono">
-                                        <?= htmlspecialchars($item['monitor_sn'] ?: '-') ?>
-                                    </div>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <div>
-                                        <?= htmlspecialchars($item['mouse'] ?: '-') ?>
-                                    </div>
-                                    <div class="text-[9px] text-slate-500 font-mono">
-                                        <?= htmlspecialchars($item['mouse_sn'] ?: '-') ?>
-                                    </div>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <div>
-                                        <?= htmlspecialchars($item['keyboard'] ?: '-') ?>
-                                    </div>
-                                    <div class="text-[9px] text-slate-500 font-mono">
-                                        <?= htmlspecialchars($item['keyboard_sn'] ?: '-') ?>
-                                    </div>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400">
-                                    <div class="flex flex-col gap-0.5">
-                                        <?php if (!empty($item['printer'])): ?>
-                                            <?php foreach(array_filter(array_map('trim', explode(',', $item['printer']))) as $ptag): ?>
-                                                <span class="inline-block bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[9px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"><?= htmlspecialchars($ptag) ?></span>
-                                            <?php endforeach; ?>
-                                        <?php else: ?>
-                                            <span class="text-slate-400">-</span>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="text-[9px] text-slate-500 font-mono mt-0.5">
-                                        <?= htmlspecialchars($item['printer_sn'] ?: '-') ?>
-                                    </div>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400">
-                                    <div class="flex flex-col gap-0.5">
-                                        <?php if (!empty($item['scanner'])): ?>
-                                            <?php foreach(array_filter(array_map('trim', explode(',', $item['scanner']))) as $stag): ?>
-                                                <span class="inline-block bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[9px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"><?= htmlspecialchars($stag) ?></span>
-                                            <?php endforeach; ?>
-                                        <?php else: ?>
-                                            <span class="text-slate-400">-</span>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="text-[9px] text-slate-500 font-mono mt-0.5">
-                                        <?= htmlspecialchars($item['scanner_sn'] ?: '-') ?>
-                                    </div>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400">
-                                    <div class="flex flex-col gap-0.5">
-                                        <?php if (!empty($item['avr_ups'])): ?>
-                                            <?php foreach(array_filter(array_map('trim', explode(',', $item['avr_ups']))) as $atag): ?>
-                                                <span class="inline-block bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[9px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"><?= htmlspecialchars($atag) ?></span>
-                                            <?php endforeach; ?>
-                                        <?php else: ?>
-                                            <span class="text-slate-400">-</span>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="text-[9px] text-slate-500 font-mono mt-0.5">
-                                        <?= htmlspecialchars($item['avr_ups_sn'] ?: '-') ?>
-                                    </div>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <?= htmlspecialchars($item['processor'] ?: '-') ?>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <?= htmlspecialchars($item['memory'] ?: '-') ?>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <?= htmlspecialchars($item['storage'] ?: '-') ?>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <?= htmlspecialchars($item['os'] ?: '-') ?>
-                                </td>
-                                <td class="px-2 py-1 text-[10px] font-mono text-slate-500 truncate max-w-[100px] whitespace-nowrap"
-                                    title="<?= htmlspecialchars($item['os_product_key'] ?? $item['ms_office_key'] ?? '') ?>">
-                                    <?= htmlspecialchars(($item['os_product_key'] ?? $item['ms_office_key'] ?? '') ?: '-') ?>
-                                </td>
-                                <td
-                                    class="px-2 py-1 text-center <?= $item['license'] === 'Y' ? 'text-[#10b981]' : 'text-slate-500' ?> whitespace-nowrap">
-                                    <?= $item['license'] ?>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <?= htmlspecialchars($item['microsoft_office'] ?: '-') ?>
-                                </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                    <?= htmlspecialchars($item['ms_office_email'] ?? '-') ?>
-                                </td>
                                 <td class="px-2 py-1 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                     <?= htmlspecialchars($item['ip_address'] ?: '-') ?>
-                                </td>
-                                <td class="px-2 py-1 text-[10px] font-mono text-slate-500 whitespace-nowrap">
-                                    <?= htmlspecialchars($item['mac_address'] ?: '-') ?>
                                 </td>
                                 <td class="px-2 py-1 text-center whitespace-nowrap">
                                     <span
