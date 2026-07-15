@@ -90,18 +90,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             
             $insertedRemote = 0;
             $updatedRemote = 0;
+            $deletedRemote = 0;
             $insertedLocal = 0;
             $updatedLocal = 0;
+            $deletedLocal = 0;
             
-            // 1. Sync Local -> Remote (Insert Missing, Update if Local is newer)
+            $maxLocalId = empty($localMap) ? 0 : max(array_keys($localMap));
+            $maxRemoteId = empty($remoteMap) ? 0 : max(array_keys($remoteMap));
+            
+            // 1. Sync Local -> Remote (Insert Missing, Update newer, Delete if deleted remotely)
             foreach ($localMap as $id => $localRow) {
                 if (!isset($remoteMap[$id])) {
-                    // Insert into remote
-                    $cols = array_keys($localRow);
-                    $placeholders = implode(', ', array_fill(0, count($cols), '?'));
-                    $stmt = $remotePdo->prepare("INSERT INTO \"$table\" (" . implode(', ', $cols) . ") VALUES ($placeholders)");
-                    $stmt->execute(array_values($localRow));
-                    $insertedRemote++;
+                    if ($id <= $maxRemoteId) {
+                        // ID is within historical remote range but missing -> It was deleted remotely.
+                        $stmt = $pdo->prepare("DELETE FROM \"$table\" WHERE \"$pk\" = ?");
+                        $stmt->execute([$id]);
+                        $deletedLocal++;
+                    } else {
+                        // Insert into remote
+                        $cols = array_keys($localRow);
+                        $placeholders = implode(', ', array_fill(0, count($cols), '?'));
+                        $stmt = $remotePdo->prepare("INSERT INTO \"$table\" (" . implode(', ', $cols) . ") VALUES ($placeholders)");
+                        $stmt->execute(array_values($localRow));
+                        $insertedRemote++;
+                    }
                 } else {
                     $remoteRow = $remoteMap[$id];
                     // Compare timestamps
@@ -123,15 +135,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 }
             }
             
-            // 2. Sync Remote -> Local (Insert Missing, Update if Remote is newer)
+            // 2. Sync Remote -> Local (Insert Missing, Update newer, Delete if deleted locally)
             foreach ($remoteMap as $id => $remoteRow) {
                 if (!isset($localMap[$id])) {
-                    // Insert into local
-                    $cols = array_keys($remoteRow);
-                    $placeholders = implode(', ', array_fill(0, count($cols), '?'));
-                    $stmt = $pdo->prepare("INSERT INTO \"$table\" (" . implode(', ', $cols) . ") VALUES ($placeholders)");
-                    $stmt->execute(array_values($remoteRow));
-                    $insertedLocal++;
+                    if ($id <= $maxLocalId) {
+                        // ID is within historical local range but missing -> It was deleted locally.
+                        $stmt = $remotePdo->prepare("DELETE FROM \"$table\" WHERE \"$pk\" = ?");
+                        $stmt->execute([$id]);
+                        $deletedRemote++;
+                    } else {
+                        // Insert into local
+                        $cols = array_keys($remoteRow);
+                        $placeholders = implode(', ', array_fill(0, count($cols), '?'));
+                        $stmt = $pdo->prepare("INSERT INTO \"$table\" (" . implode(', ', $cols) . ") VALUES ($placeholders)");
+                        $stmt->execute(array_values($remoteRow));
+                        $insertedLocal++;
+                    }
                 } else {
                     $localRow = $localMap[$id];
                     // Compare timestamps
@@ -162,8 +181,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
 
             $logs[] = "➡️ <b>$table</b> synced. " . 
-                      "<br>&nbsp;&nbsp;&nbsp;Local -> Remote: +$insertedRemote inserted, ~$updatedRemote updated" .
-                      "<br>&nbsp;&nbsp;&nbsp;Remote -> Local: +$insertedLocal inserted, ~$updatedLocal updated";
+                      "<br>&nbsp;&nbsp;&nbsp;Local -> Remote: +$insertedRemote ins, ~$updatedRemote upd, -$deletedRemote del" .
+                      "<br>&nbsp;&nbsp;&nbsp;Remote -> Local: +$insertedLocal ins, ~$updatedLocal upd, -$deletedLocal del";
             
         } catch (Exception $e) {
             $logs[] = "❌ <b>$table</b> Error: " . $e->getMessage();
