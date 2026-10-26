@@ -1,4 +1,4 @@
-﻿﻿<?php
+<?php
 require_once '../../config.php';
 requireLogin();
 
@@ -365,6 +365,7 @@ $warning_routers = $pdo->query("SELECT COUNT(*) FROM routers WHERE status = 'War
 // Filters
 $search_term = $_GET['search'] ?? '';
 $filter_status = $_GET['status'] ?? 'All';
+$filter_location = $_GET['location'] ?? 'All';
 $sort_by = $_GET['sort'] ?? 'id_desc';
 
 $where_clauses = ["1=1"];
@@ -381,6 +382,14 @@ if ($filter_status !== 'All' && !empty($filter_status)) {
     $where_clauses[] = "status = ?";
     $params[] = $filter_status;
 }
+
+if ($filter_location !== 'All' && !empty($filter_location)) {
+    $where_clauses[] = "location ILIKE ?";
+    $params[] = $filter_location . '%';
+}
+
+// Fixed building list for filter dropdown
+$distinct_locations = ['ACIS', 'Bayanihan', 'Bio Safety', 'Capiz', 'Dietary', 'Frontline', 'HOPSS', 'Isolation', 'Lingap Baga', 'Medicine', 'OB-Gyne/Pedia', 'OPD', 'Orthopaedics', 'Surgery', 'Trauma', 'Wellness'];
 
 $where_sql = implode(' AND ', $where_clauses);
 
@@ -612,11 +621,18 @@ require_once '../../includes/sidebar.php';
                     class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 text-xs rounded-xl pl-9 pr-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent w-64">
             </div>
             <input type="hidden" name="status" id="hid_status" value="<?= htmlspecialchars($filter_status) ?>">
-            <?php $r_active = ($filter_status!=='All'&&$filter_status!=='') ? $filter_status : ''; ?>
+            <input type="hidden" name="location" id="hid_location" value="<?= htmlspecialchars($filter_location) ?>">
+            <?php
+                $r_active_status   = ($filter_status   !== 'All' && $filter_status   !== '') ? $filter_status   : '';
+                $r_active_location = ($filter_location !== 'All' && $filter_location !== '') ? $filter_location : '';
+                $r_active_cat = $r_active_status ? 'status' : ($r_active_location ? 'location' : '');
+                $r_active     = $r_active_status ?: $r_active_location;
+            ?>
             <select id="r_cat" onchange="rOnCat(this.value)"
                 class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2">
                 <option value="">Filter by...</option>
-                <option value="status" <?= $r_active?'selected':'' ?>>Status</option>
+                <option value="status"   <?= $r_active_cat==='status'   ? 'selected' : '' ?>>Status</option>
+                <option value="location" <?= $r_active_cat==='location' ? 'selected' : '' ?>>Location</option>
             </select>
             <select id="r_val" onchange="rApply(this.value)"
                 class="<?= $r_active?'':'hidden' ?> bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2">
@@ -631,22 +647,32 @@ require_once '../../includes/sidebar.php';
             </div>
             <?php endif; ?>
             <script>
-            const _rA=<?= json_encode($r_active) ?>;
+            const _rActiveCat=<?= json_encode($r_active_cat) ?>;
+            const _rActiveVal=<?= json_encode($r_active) ?>;
+            const _rLocations=<?= json_encode(array_values($distinct_locations)) ?>;
             function rOnCat(c){
                 const v=document.getElementById('r_val');
                 if(!c){v.classList.add('hidden');return;}
                 v.innerHTML='<option value="All">All</option>';
-                ['Online','Offline','Warning','Maintenance'].forEach(function(o){
+                const opts = c==='location' ? _rLocations : ['Online','Offline','Warning','Maintenance'];
+                opts.forEach(function(o){
                     const e=document.createElement('option');e.value=o;e.textContent=o;
-                    if(o===_rA)e.selected=true;v.appendChild(e);
+                    if(o===_rActiveVal)e.selected=true;v.appendChild(e);
                 });
                 v.classList.remove('hidden');
             }
             function rApply(val){
-                document.getElementById('hid_status').value=val;
+                const cat=document.getElementById('r_cat').value;
+                if(cat==='location'){
+                    document.getElementById('hid_location').value=val;
+                    document.getElementById('hid_status').value='All';
+                } else {
+                    document.getElementById('hid_status').value=val;
+                    document.getElementById('hid_location').value='All';
+                }
                 document.getElementById('r_cat').closest('form').submit();
             }
-            document.addEventListener('DOMContentLoaded',function(){if(_rA)rOnCat('status');});
+            document.addEventListener('DOMContentLoaded',function(){if(_rActiveCat)rOnCat(_rActiveCat);});
             </script>
             <select name="sort" onchange="this.form.submit()"
                 class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
@@ -666,11 +692,11 @@ require_once '../../includes/sidebar.php';
                     </span>
                     <div
                         class="flex h-9 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-xl overflow-hidden mr-2">
-                        <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&limit=<?= $limit ?>"
+                        <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&location=<?= urlencode($filter_location) ?>&limit=<?= $limit ?>"
                             class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-r border-slate-200 dark:border-[#232b3d] <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>">
                             <span class="material-symbols-outlined text-[18px]">chevron_left</span>
                         </a>
-                        <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&limit=<?= $limit ?>"
+                        <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&location=<?= urlencode($filter_location) ?>&limit=<?= $limit ?>"
                             class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>">
                             <span class="material-symbols-outlined text-[18px]">chevron_right</span>
                         </a>
@@ -848,28 +874,28 @@ require_once '../../includes/sidebar.php';
                     of <span class="font-bold text-slate-900 dark:text-white"><?= $total_items ?></span> results
                 </div>
                 <div class="flex items-center gap-2">
-                    <a href="?page=1&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&limit=<?= $limit ?>"
+                    <a href="?page=1&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&location=<?= urlencode($filter_location) ?>&limit=<?= $limit ?>"
                         class="p-2 hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>"
                         title="First Page">
                         <span class="material-symbols-outlined text-[18px]">first_page</span>
                     </a>
-                    <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&limit=<?= $limit ?>"
+                    <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&location=<?= urlencode($filter_location) ?>&limit=<?= $limit ?>"
                         class="p-2 hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>">
                         <span class="material-symbols-outlined text-[18px]">chevron_left</span>
                     </a>
                     <div class="flex items-center gap-1">
                         <?php for ($i = max(1, $page - 2); $i <= min($total_pages, $page + 2); $i++): ?>
-                            <a href="?page=<?= $i ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&limit=<?= $limit ?>"
+                            <a href="?page=<?= $i ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&location=<?= urlencode($filter_location) ?>&limit=<?= $limit ?>"
                                 class="w-8 h-8 flex items-center justify-center rounded-lg text-xs font-bold transition-colors <?= $i === $page ? 'bg-primary text-white' : 'text-slate-400 hover:bg-white/5 hover:text-slate-900 dark:text-white' ?>">
                                 <?= $i ?>
                             </a>
                         <?php endfor; ?>
                     </div>
-                    <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&limit=<?= $limit ?>"
+                    <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&location=<?= urlencode($filter_location) ?>&limit=<?= $limit ?>"
                         class="p-2 hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>">
                         <span class="material-symbols-outlined text-[18px]">chevron_right</span>
                     </a>
-                    <a href="?page=<?= $total_pages ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&limit=<?= $limit ?>"
+                    <a href="?page=<?= $total_pages ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&location=<?= urlencode($filter_location) ?>&limit=<?= $limit ?>"
                         class="p-2 hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-lg transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>"
                         title="Last Page">
                         <span class="material-symbols-outlined text-[18px]">last_page</span>

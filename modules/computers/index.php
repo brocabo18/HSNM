@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 require_once '../../config.php';
 requireLogin();
 
@@ -551,11 +551,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $floor_val    = $_POST['floor'] ?? '';
                 $dept_text    = $_POST['department'] ?? '';
                 $location_val = trim("$building_val $floor_val $dept_text");
-                $stmt = $pdo->prepare("INSERT INTO computers (department, end_user, mr_par, control_number, system_unit, system_unit_sn, monitor, monitor_sn, mouse, mouse_sn, keyboard, keyboard_sn, printer, printer_sn, scanner, scanner_sn, avr_ups, avr_ups_sn, processor, memory, storage, os, os_product_key, license, microsoft_office, ms_office_email, ip_address, mac_address, endpoint_secure, firewall, checked_by, encoded_by, remarks, remarks_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt = $pdo->prepare("INSERT INTO computers (department, end_user, mr_par, status, control_number, system_unit, system_unit_sn, monitor, monitor_sn, mouse, mouse_sn, keyboard, keyboard_sn, printer, printer_sn, scanner, scanner_sn, avr_ups, avr_ups_sn, processor, memory, storage, os, os_product_key, license, microsoft_office, ms_office_email, ip_address, mac_address, endpoint_secure, firewall, checked_by, encoded_by, remarks, remarks_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $stmt->execute([
                     $location_val,
                     $_POST['end_user'],
                     $_POST['mr_par'],
+                    $_POST['status'] ?? 'Working',
                     $_POST['control_number'],
                     $_POST['system_unit'],
                     $_POST['system_unit_sn'],
@@ -734,11 +735,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $snap->execute([$_POST['id']]);
                 $old_comp = $snap->fetch(PDO::FETCH_ASSOC) ?: [];
 
-                $stmt = $pdo->prepare("UPDATE computers SET department=?, end_user=?, mr_par=?, control_number=?, system_unit=?, system_unit_sn=?, monitor=?, monitor_sn=?, mouse=?, mouse_sn=?, keyboard=?, keyboard_sn=?, printer=?, printer_sn=?, scanner=?, scanner_sn=?, avr_ups=?, avr_ups_sn=?, processor=?, memory=?, storage=?, os=?, os_product_key=?, license=?, microsoft_office=?, ms_office_email=?, ip_address=?, mac_address=?, endpoint_secure=?, firewall=?, checked_by=?, encoded_by=?, remarks=?, remarks_date=? WHERE id=?");
+                $stmt = $pdo->prepare("UPDATE computers SET department=?, end_user=?, mr_par=?, status=?, transferred_to=?, control_number=?, system_unit=?, system_unit_sn=?, monitor=?, monitor_sn=?, mouse=?, mouse_sn=?, keyboard=?, keyboard_sn=?, printer=?, printer_sn=?, scanner=?, scanner_sn=?, avr_ups=?, avr_ups_sn=?, processor=?, memory=?, storage=?, os=?, os_product_key=?, license=?, microsoft_office=?, ms_office_email=?, ip_address=?, mac_address=?, endpoint_secure=?, firewall=?, checked_by=?, encoded_by=?, remarks=?, remarks_date=? WHERE id=?");
+                $new_status = $_POST['status'] ?? 'Working';
+                $new_transferred_to = ($new_status === 'Transferred') ? ($_POST['transferred_to'] ?? null) : null;
                 $stmt->execute([
                     $location_val,
                     $_POST['end_user'],
                     $_POST['mr_par'],
+                    $new_status,
+                    $new_transferred_to,
                     $_POST['control_number'],
                     $_POST['system_unit'],
                     $_POST['system_unit_sn'],
@@ -772,6 +777,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     !empty($_POST['remarks_date']) ? $_POST['remarks_date'] : null,
                     $_POST['id']
                 ]);
+
+                // ── If Transferred, copy record to the target satellite table ──
+                if ($new_status === 'Transferred' && !empty($new_transferred_to)) {
+                    $table_map = [
+                        'JASMC-ST'    => 'computers_jasmc_st',
+                        'JASMC-VT'    => 'computers_jasmc_vt',
+                        'DOH-JBL-CMC' => 'computers_doh_jbl_cmc',
+                    ];
+                    $target_table = $table_map[$new_transferred_to] ?? null;
+                    if ($target_table) {
+                        $snap2 = $pdo->prepare("SELECT * FROM computers WHERE id = ?");
+                        $snap2->execute([$_POST['id']]);
+                        $cur_comp = $snap2->fetch(PDO::FETCH_ASSOC) ?: [];
+                        if ($cur_comp) {
+                            try {
+                                $ins_transfer = $pdo->prepare("INSERT INTO $target_table
+                                    (department, end_user, mr_par, status, transferred_to, control_number, system_unit, system_unit_sn,
+                                     monitor, monitor_sn, mouse, mouse_sn, keyboard, keyboard_sn, printer, printer_sn,
+                                     scanner, scanner_sn, avr_ups, avr_ups_sn, processor, memory, storage, os, os_product_key,
+                                     license, microsoft_office, ms_office_email, ip_address, mac_address, endpoint_secure,
+                                     firewall, checked_by, encoded_by, remarks, remarks_date, source_computer_id, transferred_at)
+                                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())
+                                    ON CONFLICT (control_number) DO UPDATE SET
+                                        department=EXCLUDED.department, end_user=EXCLUDED.end_user, mr_par=EXCLUDED.mr_par,
+                                        status=EXCLUDED.status, transferred_to=EXCLUDED.transferred_to,
+                                        system_unit=EXCLUDED.system_unit, system_unit_sn=EXCLUDED.system_unit_sn,
+                                        monitor=EXCLUDED.monitor, monitor_sn=EXCLUDED.monitor_sn,
+                                        mouse=EXCLUDED.mouse, mouse_sn=EXCLUDED.mouse_sn,
+                                        keyboard=EXCLUDED.keyboard, keyboard_sn=EXCLUDED.keyboard_sn,
+                                        printer=EXCLUDED.printer, printer_sn=EXCLUDED.printer_sn,
+                                        scanner=EXCLUDED.scanner, scanner_sn=EXCLUDED.scanner_sn,
+                                        avr_ups=EXCLUDED.avr_ups, avr_ups_sn=EXCLUDED.avr_ups_sn,
+                                        processor=EXCLUDED.processor, memory=EXCLUDED.memory, storage=EXCLUDED.storage,
+                                        os=EXCLUDED.os, os_product_key=EXCLUDED.os_product_key,
+                                        license=EXCLUDED.license, microsoft_office=EXCLUDED.microsoft_office,
+                                        ms_office_email=EXCLUDED.ms_office_email, ip_address=EXCLUDED.ip_address,
+                                        mac_address=EXCLUDED.mac_address, endpoint_secure=EXCLUDED.endpoint_secure,
+                                        firewall=EXCLUDED.firewall, checked_by=EXCLUDED.checked_by,
+                                        encoded_by=EXCLUDED.encoded_by, remarks=EXCLUDED.remarks,
+                                        remarks_date=EXCLUDED.remarks_date, source_computer_id=EXCLUDED.source_computer_id,
+                                        transferred_at=NOW()
+                                ");
+                                $ins_transfer->execute([
+                                    $cur_comp['department'], $cur_comp['end_user'], $cur_comp['mr_par'],
+                                    'Working', null, $cur_comp['control_number'],
+                                    $cur_comp['system_unit'], $cur_comp['system_unit_sn'],
+                                    $cur_comp['monitor'], $cur_comp['monitor_sn'],
+                                    $cur_comp['mouse'], $cur_comp['mouse_sn'],
+                                    $cur_comp['keyboard'], $cur_comp['keyboard_sn'],
+                                    $cur_comp['printer'], $cur_comp['printer_sn'],
+                                    $cur_comp['scanner'], $cur_comp['scanner_sn'],
+                                    $cur_comp['avr_ups'], $cur_comp['avr_ups_sn'],
+                                    $cur_comp['processor'], $cur_comp['memory'], $cur_comp['storage'],
+                                    $cur_comp['os'], $cur_comp['os_product_key'],
+                                    $cur_comp['license'], $cur_comp['microsoft_office'],
+                                    $cur_comp['ms_office_email'], $cur_comp['ip_address'],
+                                    $cur_comp['mac_address'], $cur_comp['endpoint_secure'],
+                                    $cur_comp['firewall'], $cur_comp['checked_by'],
+                                    $cur_comp['encoded_by'], $cur_comp['remarks'],
+                                    $cur_comp['remarks_date'] ?? null, $_POST['id']
+                                ]);
+                                logAudit($pdo, 'transfer_computer', "Transferred Computer Control #: {$cur_comp['control_number']} to $new_transferred_to", 'computer', $_POST['id']);
+                            } catch (Exception $tr_e) {
+                                error_log("Transfer to $new_transferred_to failed: " . $tr_e->getMessage());
+                            }
+                        }
+                    }
+                }
 
                 // ── Build field-level diff for audit trail ───────────────────
                 $field_labels = [
@@ -949,6 +1022,7 @@ $is_ajax = isset($_GET['ajax']);
 $search_term = $_GET['search'] ?? '';
 $department_filter = $_GET['department'] ?? 'All';
 $printer_filter = $_GET['printer'] ?? 'All';
+$printer_sn_filter = $_GET['printer_sn'] ?? 'All';
 $memory_filter = $_GET['memory'] ?? 'All';
 $os_filter = $_GET['os'] ?? 'All';
 $ms_office_filter = $_GET['ms_office'] ?? 'All';
@@ -1005,6 +1079,11 @@ if ($department_filter !== 'All' && !empty($department_filter)) {
 if ($printer_filter !== 'All' && !empty($printer_filter)) {
     $where_clauses[] = "printer ILIKE ?";
     $params[] = '%' . $printer_filter . '%';
+}
+
+if ($printer_sn_filter !== 'All' && !empty($printer_sn_filter)) {
+    $where_clauses[] = "printer_sn ILIKE ?";
+    $params[] = '%' . $printer_sn_filter . '%';
 }
 
 if ($memory_filter !== 'All' && !empty($memory_filter)) {
@@ -1065,7 +1144,7 @@ $count_stmt = $pdo->prepare("SELECT COUNT(*) FROM computers WHERE $where_sql");
 $count_stmt->execute($params);
 $total_items = $count_stmt->fetchColumn();
 $total_pages = ceil($total_items / $limit);
-$page_params = "&search=" . urlencode($search_term) . "&department=" . urlencode($department_filter) . "&printer=" . urlencode($printer_filter) . "&memory=" . urlencode($memory_filter) . "&os=" . urlencode($os_filter) . "&ms_office=" . urlencode($ms_office_filter) . "&checked_by=" . urlencode($checked_by_filter) . "&sort=" . urlencode($sort_by) . "&limit=" . urlencode($limit_param);
+$page_params = "&search=" . urlencode($search_term) . "&department=" . urlencode($department_filter) . "&printer=" . urlencode($printer_filter) . "&printer_sn=" . urlencode($printer_sn_filter) . "&memory=" . urlencode($memory_filter) . "&os=" . urlencode($os_filter) . "&ms_office=" . urlencode($ms_office_filter) . "&checked_by=" . urlencode($checked_by_filter) . "&sort=" . urlencode($sort_by) . "&limit=" . urlencode($limit_param);
 
 $sql = "SELECT c.*, last_edit.username AS last_edited_by, last_edit.created_at AS last_edited_at
     FROM computers c
@@ -1095,6 +1174,9 @@ $printers = $pdo->query("
     WHERE printer IS NOT NULL AND printer != ''
     ORDER BY printer
 ")->fetchAll(PDO::FETCH_COLUMN);
+
+// Get unique printer serial numbers
+$printer_sns = $pdo->query("SELECT DISTINCT printer_sn FROM computers WHERE printer_sn IS NOT NULL AND TRIM(printer_sn) != '' ORDER BY printer_sn")->fetchAll(PDO::FETCH_COLUMN);
 
 // Get unique memory values
 $memories = $pdo->query("SELECT DISTINCT memory FROM computers WHERE memory IS NOT NULL AND memory != '' ORDER BY memory")->fetchAll(PDO::FETCH_COLUMN);
@@ -1274,6 +1356,7 @@ if (!$is_ajax) {
                     <!-- Hidden inputs carry all active filter values on submit -->
                     <input type="hidden" name="department" id="hid_department" value="<?= htmlspecialchars($department_filter) ?>">
                     <input type="hidden" name="printer"    id="hid_printer"    value="<?= htmlspecialchars($printer_filter) ?>">
+                    <input type="hidden" name="printer_sn" id="hid_printer_sn" value="<?= htmlspecialchars($printer_sn_filter) ?>">
                     <input type="hidden" name="memory"     id="hid_memory"     value="<?= htmlspecialchars($memory_filter) ?>">
                     <input type="hidden" name="os"         id="hid_os"         value="<?= htmlspecialchars($os_filter) ?>">
                     <input type="hidden" name="ms_office"  id="hid_ms_office"  value="<?= htmlspecialchars($ms_office_filter) ?>">
@@ -1285,6 +1368,7 @@ if (!$is_ajax) {
                     $active_cat_val = '';
                     if ($department_filter  !== 'All' && $department_filter  !== '') { $active_cat_key = 'department'; $active_cat_val = $department_filter; }
                     elseif ($printer_filter !== 'All' && $printer_filter     !== '') { $active_cat_key = 'printer';    $active_cat_val = $printer_filter; }
+                    elseif ($printer_sn_filter !== 'All' && $printer_sn_filter !== '') { $active_cat_key = 'printer_sn'; $active_cat_val = $printer_sn_filter; }
                     elseif ($memory_filter  !== 'All' && $memory_filter      !== '') { $active_cat_key = 'memory';     $active_cat_val = $memory_filter; }
                     elseif ($os_filter      !== 'All' && $os_filter          !== '') { $active_cat_key = 'os';         $active_cat_val = $os_filter; }
                     elseif ($ms_office_filter!=='All' && $ms_office_filter   !== '') { $active_cat_key = 'ms_office';  $active_cat_val = $ms_office_filter; }
@@ -1294,6 +1378,7 @@ if (!$is_ajax) {
                     $filter_options = [
                         'department' => $departments,
                         'printer'    => $printers,
+                        'printer_sn' => $printer_sns,
                         'memory'     => $memories,
                         'os'         => $os_values,
                         'ms_office'  => $ms_office_values,
@@ -1308,6 +1393,7 @@ if (!$is_ajax) {
                         <option value="">Filter by...</option>
                         <option value="department"  <?= $active_cat_key==='department' ?'selected':'' ?>>Location</option>
                         <option value="printer"     <?= $active_cat_key==='printer'   ?'selected':'' ?>>Printer</option>
+                        <option value="printer_sn"  <?= $active_cat_key==='printer_sn'?'selected':'' ?>>Printer S/N</option>
                         <option value="memory"      <?= $active_cat_key==='memory'    ?'selected':'' ?>>Memory</option>
                         <option value="os"          <?= $active_cat_key==='os'        ?'selected':'' ?>>OS</option>
                         <option value="ms_office"   <?= $active_cat_key==='ms_office' ?'selected':'' ?>>MS Office</option>
@@ -1355,7 +1441,7 @@ if (!$is_ajax) {
                     });
 
                     // Reset the previous category's hidden input to 'All'
-                    ['department','printer','memory','os','ms_office','checked_by'].forEach(function(k) {
+                    ['department','printer','printer_sn','memory','os','ms_office','checked_by'].forEach(function(k) {
                         if (k !== cat) {
                             const h = document.getElementById('hid_' + k);
                             if (h) h.value = 'All';
@@ -1407,6 +1493,8 @@ if (!$is_ajax) {
                         <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
                             MR/PAR</th>
                         <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
+                            Status</th>
+                        <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
                             IP Address</th>
                         <th class="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
                             Endpoint<br>Secure</th>
@@ -1450,6 +1538,23 @@ if (!$is_ajax) {
                                 </td>
                                 <td class="px-2 py-1 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                     <?= htmlspecialchars($item['mr_par'] ?: '-') ?>
+                                </td>
+                                <td class="px-2 py-1 whitespace-nowrap">
+                                    <?php
+                                    $status_val = $item['status'] ?? 'Working';
+                                    $status_class = match($status_val) {
+                                        'Working' => 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+                                        'Transferred' => 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+                                        'Condemned' => 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+                                        default => 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+                                    };
+                                    ?>
+                                    <span class="<?= $status_class ?>">
+                                        <?= htmlspecialchars($status_val) ?>
+                                    </span>
+                                    <?php if ($status_val === 'Transferred' && !empty($item['transferred_to'])): ?>
+                                        <div class="text-[9px] text-blue-500 mt-0.5">→ <?= htmlspecialchars($item['transferred_to']) ?></div>
+                                    <?php endif; ?>
                                 </td>
                                 <td class="px-2 py-1 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                     <?= htmlspecialchars($item['ip_address'] ?: '-') ?>

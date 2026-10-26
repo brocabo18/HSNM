@@ -1,4 +1,4 @@
-﻿﻿<?php
+<?php
 require_once '../../config.php';
 requireLogin();
 
@@ -605,9 +605,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt_latest->execute([$ip]);
             $latest_data = $stmt_latest->fetch(PDO::FETCH_ASSOC);
 
+            ob_clean();
+            header('Content-Type: application/json');
             echo json_encode(['success' => true, 'output' => $output_str, 'data' => $latest_data]);
             exit;
         } else {
+            ob_clean();
+            header('Content-Type: application/json');
             echo json_encode(['success' => false, 'error' => 'Invalid IP address']);
             exit;
         }
@@ -696,6 +700,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $result_summary[] = "===============";
         $result_summary = array_merge($result_summary, $arp_output);
 
+        ob_clean();
+        header('Content-Type: application/json');
         echo json_encode(['success' => true, 'output' => implode("\n", $result_summary), 'updates' => count($updates)]);
         exit;
     } elseif ($_POST['action'] === 'batch_update_device_types') {
@@ -751,9 +757,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 $subnets = $pdo->query("SELECT * FROM subnets ORDER BY name ASC")->fetchAll();
 
 // Stats
-$total_ips = $pdo->query("SELECT COUNT(*) FROM ips")->fetchColumn();
-$active_ips = $pdo->query("SELECT COUNT(*) FROM ips WHERE status = 'active'")->fetchColumn();
+$total_ips     = $pdo->query("SELECT COUNT(*) FROM ips")->fetchColumn();
+$active_ips    = $pdo->query("SELECT COUNT(*) FROM ips WHERE status = 'active'")->fetchColumn();
 $available_ips = $pdo->query("SELECT COUNT(*) FROM ips WHERE status = 'available'")->fetchColumn();
+$offline_ips   = $pdo->query("SELECT COUNT(*) FROM ips WHERE status = 'offline'")->fetchColumn();
+$reserved_ips  = $pdo->query("SELECT COUNT(*) FROM ips WHERE status = 'reserved'")->fetchColumn();
 
 // Filters
 $search_term = $_GET['search'] ?? '';
@@ -1019,7 +1027,7 @@ require_once '../../includes/sidebar.php';
     <?php endif; ?>
 
     <!-- Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
         <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
             <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total IPs</div>
             <div class="text-2xl font-bold text-slate-900 dark:text-white">
@@ -1038,7 +1046,20 @@ require_once '../../includes/sidebar.php';
                 <?= number_format($available_ips) ?>
             </div>
         </div>
+        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Offline</div>
+            <div class="text-2xl font-bold text-orange-400">
+                <?= number_format($offline_ips) ?>
+            </div>
+        </div>
+        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Reserved</div>
+            <div class="text-2xl font-bold text-purple-400">
+                <?= number_format($reserved_ips) ?>
+            </div>
+        </div>
     </div>
+
 
     <!-- Control Bar -->
     <div class="no-print mb-6 flex gap-3">
@@ -2205,7 +2226,7 @@ require_once '../../includes/sidebar.php';
         }
 
         /* Hide stats cards */
-        .grid.grid-cols-1.md\:grid-cols-3.gap-4.mb-8 {
+        .grid.grid-cols-1.md\:grid-cols-5.gap-4.mb-8 {
             display: none !important;
         }
 

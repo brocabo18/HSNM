@@ -225,7 +225,17 @@ if ($search) {
 
 if ($view === 'mismatch') {
     // 1. Data Mismatches (Same CN, Diff Data)
-    $where_condition = "(COALESCE(i.ip_address, '') != COALESCE(c.ip_address, '')) OR (COALESCE(i.mac_address, '') != COALESCE(c.mac_address, ''))";
+    // Normalize MAC separators (colon vs dash) so format differences are not flagged as real mismatches.
+    // Also exclude empty/null control numbers to prevent a cartesian join against all unassigned IPS rows.
+    $where_condition = "
+        c.control_number != '' AND c.control_number IS NOT NULL
+        AND (
+            (COALESCE(i.ip_address, '') != COALESCE(c.ip_address, ''))
+            OR (
+                REPLACE(COALESCE(i.mac_address, ''), ':', '-') !=
+                REPLACE(COALESCE(c.mac_address, ''), ':', '-')
+            )
+        )";
     
     $base_sql = "FROM computers c INNER JOIN ips i ON c.control_number = i.control_number WHERE $where_condition $search_condition";
     
@@ -384,7 +394,8 @@ if ($is_ajax) {
                             <?php if ($view === 'mismatch'): ?>
                                 <?php 
                                     $ip_diff = trim($row['ip_inv_ip']) !== trim($row['comp_inv_ip']);
-                                    $mac_diff = trim($row['ip_inv_mac']) !== trim($row['comp_inv_mac']);
+                                    // Normalize MAC separators (colon vs dash) before highlighting
+                                    $mac_diff = str_replace(':', '-', trim($row['ip_inv_mac'])) !== str_replace(':', '-', trim($row['comp_inv_mac']));
                                 ?>
                                 <td class="px-4 py-4 align-top">
                                     <div class="font-bold text-slate-900 dark:text-white text-sm"><?= htmlspecialchars($row['control_number']) ?></div>
