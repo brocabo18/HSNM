@@ -23,147 +23,77 @@ $stats = [
 
 $dbConnectionError = defined('DB_ERROR') ? DB_ERROR : null;
 
-try {
-    if (!$pdo) {
-        throw new Exception($dbConnectionError ?: "Database connection not established");
+// Safe counting helper that catches missing tables/columns without aborting other stats
+$safeCount = function($sql, $default = 0) use ($pdo) {
+    if (!$pdo) return $default;
+    try {
+        $val = $pdo->query($sql)->fetchColumn();
+        return $val !== false ? (int)$val : $default;
+    } catch (Exception $e) {
+        return $default;
     }
+};
 
-    // Check which tables actually exist in the database to prevent fatal missing relation errors
-    $existingTablesStmt = $pdo->query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'");
-    $existingTables = $existingTablesStmt->fetchAll(PDO::FETCH_COLUMN);
-    $hasTable = fn($t) => in_array($t, $existingTables);
-
-    // Build subqueries dynamically based on existing tables
-    $subqueries = [];
-
-    // Routers
-    if ($hasTable('routers')) {
-        $subqueries[] = "(SELECT COUNT(*) FROM routers) as routers_total";
-        $subqueries[] = "(SELECT COUNT(*) FROM routers WHERE status = 'Online') as routers_online";
-        $subqueries[] = "(SELECT COUNT(*) FROM routers WHERE status = 'Offline') as routers_offline";
-    } else {
-        $subqueries[] = "0 as routers_total, 0 as routers_online, 0 as routers_offline";
+$safeSum = function($sql, $default = 0.0) use ($pdo) {
+    if (!$pdo) return $default;
+    try {
+        $val = $pdo->query($sql)->fetchColumn();
+        return $val !== false ? (float)$val : $default;
+    } catch (Exception $e) {
+        return $default;
     }
+};
 
-    // Switches
-    if ($hasTable('switches')) {
-        $subqueries[] = "(SELECT COUNT(*) FROM switches) as switches_total";
-        $subqueries[] = "(SELECT COUNT(*) FROM switches WHERE status = 'Active') as switches_active";
-        $subqueries[] = "(SELECT COUNT(*) FROM switches WHERE status = 'Inactive') as switches_inactive";
-    } else {
-        $subqueries[] = "0 as switches_total, 0 as switches_active, 0 as switches_inactive";
-    }
+// Routers
+$stats['routers']['total']   = $safeCount("SELECT COUNT(*) FROM routers");
+$stats['routers']['online']  = $safeCount("SELECT COUNT(*) FROM routers WHERE status = 'Online'");
+$stats['routers']['offline'] = $safeCount("SELECT COUNT(*) FROM routers WHERE status = 'Offline'");
 
-    // IPs
-    if ($hasTable('ips')) {
-        $subqueries[] = "(SELECT COUNT(*) FROM ips) as ips_total";
-        $subqueries[] = "(SELECT COUNT(*) FROM ips WHERE status = 'active') as ips_active";
-    } else {
-        $subqueries[] = "0 as ips_total, 0 as ips_active";
-    }
+// Switches
+$stats['switches']['total']    = $safeCount("SELECT COUNT(*) FROM switches");
+$stats['switches']['active']   = $safeCount("SELECT COUNT(*) FROM switches WHERE status = 'Active'");
+$stats['switches']['inactive'] = $safeCount("SELECT COUNT(*) FROM switches WHERE status = 'Inactive'");
 
-    // Computers
-    if ($hasTable('computers')) {
-        $subqueries[] = "(SELECT COUNT(*) FROM computers) as computers_total";
-        $subqueries[] = "(SELECT COUNT(*) FROM computers WHERE status = 'Working') as computers_working";
-        $subqueries[] = "(SELECT COUNT(*) FROM computers WHERE status = 'Transferred') as computers_transferred";
-        $subqueries[] = "(SELECT COUNT(*) FROM computers WHERE status = 'Condemned') as computers_condemned";
-    } else {
-        $subqueries[] = "0 as computers_total, 0 as computers_working, 0 as computers_transferred, 0 as computers_condemned";
-    }
+// IPs
+$stats['ips']['total']     = $safeCount("SELECT COUNT(*) FROM ips");
+$stats['ips']['active']    = $safeCount("SELECT COUNT(*) FROM ips WHERE status = 'active'");
+$stats['ips']['available'] = max(0, $stats['ips']['total'] - $stats['ips']['active']);
 
-    // Satellite Branches
-    $subqueries[] = $hasTable('computers_jasmc_st') ? "(SELECT COUNT(*) FROM computers_jasmc_st) as jasmc_st_total" : "0 as jasmc_st_total";
-    $subqueries[] = $hasTable('computers_jasmc_vt') ? "(SELECT COUNT(*) FROM computers_jasmc_vt) as jasmc_vt_total" : "0 as jasmc_vt_total";
-    $subqueries[] = $hasTable('computers_doh_jbl_cmc') ? "(SELECT COUNT(*) FROM computers_doh_jbl_cmc) as doh_jbl_cmc_total" : "0 as doh_jbl_cmc_total";
+// Computers & Status Breakdown
+$stats['computers']['total']       = $safeCount("SELECT COUNT(*) FROM computers");
+$stats['computers']['working']     = $safeCount("SELECT COUNT(*) FROM computers WHERE status = 'Working'");
+$stats['computers']['transferred'] = $safeCount("SELECT COUNT(*) FROM computers WHERE status = 'Transferred'");
+$stats['computers']['condemned']   = $safeCount("SELECT COUNT(*) FROM computers WHERE status = 'Condemned'");
 
-    // Assets
-    if ($hasTable('assets')) {
-        $subqueries[] = "(SELECT COUNT(*) FROM assets) as assets_total";
-        $subqueries[] = "(SELECT COUNT(*) FROM assets WHERE status = 'Active') as assets_active";
-        $subqueries[] = "(SELECT COUNT(*) FROM assets WHERE status = 'Maintenance') as assets_maintenance";
-        $subqueries[] = "(SELECT COUNT(*) FROM assets WHERE status = 'Retired') as assets_retired";
-        $subqueries[] = "(SELECT COALESCE(SUM(cost), 0) FROM assets) as assets_total_cost";
-    } else {
-        $subqueries[] = "0 as assets_total, 0 as assets_active, 0 as assets_maintenance, 0 as assets_retired, 0 as assets_total_cost";
-    }
+// Satellite Branches
+$stats['jasmc_st']['total']    = $safeCount("SELECT COUNT(*) FROM computers_jasmc_st");
+$stats['jasmc_vt']['total']    = $safeCount("SELECT COUNT(*) FROM computers_jasmc_vt");
+$stats['doh_jbl_cmc']['total'] = $safeCount("SELECT COUNT(*) FROM computers_doh_jbl_cmc");
 
-    // Maintenance
-    if ($hasTable('maintenance')) {
-        $subqueries[] = "(SELECT COUNT(*) FROM maintenance) as maintenance_total";
-        $subqueries[] = "(SELECT COUNT(*) FROM maintenance WHERE status = 'Completed') as maintenance_completed";
-        $subqueries[] = "(SELECT COUNT(*) FROM maintenance WHERE status = 'Needs Action' OR status = 'Critical Failure') as maintenance_alerts";
-        $subqueries[] = "(SELECT COALESCE(ROUND(AVG(performance_score)), 0) FROM maintenance) as maintenance_avg_score";
-    } else {
-        $subqueries[] = "0 as maintenance_total, 0 as maintenance_completed, 0 as maintenance_alerts, 0 as maintenance_avg_score";
-    }
+// Asset Inventory
+$stats['assets']['total']       = $safeCount("SELECT COUNT(*) FROM assets");
+$stats['assets']['active']      = $safeCount("SELECT COUNT(*) FROM assets WHERE status = 'Active'");
+$stats['assets']['maintenance'] = $safeCount("SELECT COUNT(*) FROM assets WHERE status = 'Maintenance'");
+$stats['assets']['retired']     = $safeCount("SELECT COUNT(*) FROM assets WHERE status = 'Retired'");
+$stats['assets']['total_cost']  = $safeSum("SELECT COALESCE(SUM(cost), 0) FROM assets");
 
-    // ICS, Office, PABX, Printers, TVs
-    $subqueries[] = $hasTable('ics_inventory') ? "(SELECT COUNT(*) FROM ics_inventory) as ics_total" : "0 as ics_total";
-    $subqueries[] = $hasTable('office_licenses') ? "(SELECT COUNT(*) FROM office_licenses) as office_total" : "0 as office_total";
-    $subqueries[] = $hasTable('pabx_directory') ? "(SELECT COUNT(*) FROM pabx_directory) as pabx_total" : "0 as pabx_total";
-    $subqueries[] = $hasTable('printers') ? "(SELECT COUNT(*) FROM printers) as printers_total" : "0 as printers_total";
-    $subqueries[] = $hasTable('queueing_tvs') ? "(SELECT COUNT(*) FROM queueing_tvs) as queueing_tv_total" : "0 as queueing_tv_total";
+// Preventive Maintenance
+$stats['maintenance']['total']       = $safeCount("SELECT COUNT(*) FROM maintenance");
+$stats['maintenance']['completed']   = $safeCount("SELECT COUNT(*) FROM maintenance WHERE status = 'Completed'");
+$stats['maintenance']['alerts']      = $safeCount("SELECT COUNT(*) FROM maintenance WHERE status = 'Needs Action' OR status = 'Critical Failure'");
+$stats['maintenance']['avg_score']   = $safeCount("SELECT COALESCE(ROUND(AVG(performance_score)), 0) FROM maintenance");
 
-    $batch_query = "SELECT " . implode(",\n        ", $subqueries);
-    $counts = $pdo->query($batch_query)->fetch(PDO::FETCH_ASSOC);
-    
-    // Routers
-    $stats['routers']['total'] = (int)($counts['routers_total'] ?? 0);
-    $stats['routers']['online'] = (int)($counts['routers_online'] ?? 0);
-    $stats['routers']['offline'] = (int)($counts['routers_offline'] ?? 0);
+// ICS, Office, PABX, Printers, TVs
+$stats['ics']['total']         = $safeCount("SELECT COUNT(*) FROM ics_inventory");
+$stats['office']['total']      = $safeCount("SELECT COUNT(*) FROM office_licenses");
+$stats['pabx']['total']        = $safeCount("SELECT COUNT(*) FROM pabx_directory");
+$stats['printers']['total']    = $safeCount("SELECT COUNT(*) FROM printers");
+$stats['queueing_tv']['total'] = $safeCount("SELECT COUNT(*) FROM queueing_tvs");
 
-    // Switches
-    $stats['switches']['total'] = (int)($counts['switches_total'] ?? 0);
-    $stats['switches']['active'] = (int)($counts['switches_active'] ?? 0);
-    $stats['switches']['inactive'] = (int)($counts['switches_inactive'] ?? 0);
-
-    // IPs
-    $stats['ips']['total'] = (int)($counts['ips_total'] ?? 0);
-    $stats['ips']['active'] = (int)($counts['ips_active'] ?? 0);
-    $stats['ips']['available'] = max(0, $stats['ips']['total'] - $stats['ips']['active']);
-
-    // Computers & Status Breakdown
-    $stats['computers']['total'] = (int)($counts['computers_total'] ?? 0);
-    $stats['computers']['working'] = (int)($counts['computers_working'] ?? 0);
-    $stats['computers']['transferred'] = (int)($counts['computers_transferred'] ?? 0);
-    $stats['computers']['condemned'] = (int)($counts['computers_condemned'] ?? 0);
-
-    // Satellite Branches
-    $stats['jasmc_st']['total'] = (int)($counts['jasmc_st_total'] ?? 0);
-    $stats['jasmc_vt']['total'] = (int)($counts['jasmc_vt_total'] ?? 0);
-    $stats['doh_jbl_cmc']['total'] = (int)($counts['doh_jbl_cmc_total'] ?? 0);
-
-    // Asset Inventory
-    $stats['assets']['total'] = (int)($counts['assets_total'] ?? 0);
-    $stats['assets']['active'] = (int)($counts['assets_active'] ?? 0);
-    $stats['assets']['maintenance'] = (int)($counts['assets_maintenance'] ?? 0);
-    $stats['assets']['retired'] = (int)($counts['assets_retired'] ?? 0);
-    $stats['assets']['total_cost'] = (float)($counts['assets_total_cost'] ?? 0);
-
-    // Preventive Maintenance
-    $stats['maintenance']['total'] = (int)($counts['maintenance_total'] ?? 0);
-    $stats['maintenance']['completed'] = (int)($counts['maintenance_completed'] ?? 0);
-    $stats['maintenance']['alerts'] = (int)($counts['maintenance_alerts'] ?? 0);
-    $stats['maintenance']['avg_score'] = (int)($counts['maintenance_avg_score'] ?? 0);
-
-    // ICS, Office, PABX, Printers, TVs
-    $stats['ics']['total'] = (int)($counts['ics_total'] ?? 0);
-    $stats['office']['total'] = (int)($counts['office_total'] ?? 0);
-    $stats['pabx']['total'] = (int)($counts['pabx_total'] ?? 0);
-    $stats['printers']['total'] = (int)($counts['printers_total'] ?? 0);
-    $stats['queueing_tv']['total'] = (int)($counts['queueing_tv_total'] ?? 0);
-
-    // Reconciliation (only if both computers and ips tables exist)
-    if ($hasTable('computers') && $hasTable('ips')) {
-        $mismatch_count = (int)$pdo->query("SELECT COUNT(*) FROM computers c INNER JOIN ips i ON c.control_number = i.control_number WHERE (COALESCE(i.ip_address, '') != COALESCE(c.ip_address, '')) OR (COALESCE(i.mac_address, '') != COALESCE(c.mac_address, ''))")->fetchColumn();
-        $conflict_count = (int)$pdo->query("SELECT COUNT(*) FROM computers c INNER JOIN ips i ON (i.ip_address = c.ip_address OR i.mac_address = c.mac_address) WHERE (i.control_number != c.control_number) AND ((i.ip_address = c.ip_address AND i.ip_address != '' AND i.ip_address IS NOT NULL AND c.ip_address NOT LIKE '%DHCP%') OR (i.mac_address = c.mac_address AND i.mac_address != '' AND i.mac_address IS NOT NULL))")->fetchColumn();
-        $stats['reconciliation']['total'] = $mismatch_count + $conflict_count;
-    }
-
-} catch (Exception $e) {
-    error_log("Dashboard query error: " . $e->getMessage());
-}
+// Reconciliation (Mismatches + Conflicts)
+$mismatch_count = $safeCount("SELECT COUNT(*) FROM computers c INNER JOIN ips i ON c.control_number = i.control_number WHERE (COALESCE(i.ip_address, '') != COALESCE(c.ip_address, '')) OR (COALESCE(i.mac_address, '') != COALESCE(c.mac_address, ''))");
+$conflict_count = $safeCount("SELECT COUNT(*) FROM computers c INNER JOIN ips i ON (i.ip_address = c.ip_address OR i.mac_address = c.mac_address) WHERE (i.control_number != c.control_number) AND ((i.ip_address = c.ip_address AND i.ip_address != '' AND i.ip_address IS NOT NULL AND c.ip_address NOT LIKE '%DHCP%') OR (i.mac_address = c.mac_address AND i.mac_address != '' AND i.mac_address IS NOT NULL))");
+$stats['reconciliation']['total'] = $mismatch_count + $conflict_count;
 
 // Compute aggregate overview numbers
 $total_hardware_endpoints = $stats['computers']['total'] + $stats['jasmc_st']['total'] + $stats['jasmc_vt']['total'] + $stats['doh_jbl_cmc']['total'] + $stats['routers']['total'] + $stats['switches']['total'] + $stats['printers']['total'] + $stats['queueing_tv']['total'];
