@@ -1,4 +1,4 @@
-﻿﻿<?php
+<?php
 require_once '../../config.php';
 requireLogin();
 
@@ -112,96 +112,77 @@ require_once '../../includes/sidebar.php';
 ?>
 
 <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark">
-    <header
-        class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+    <header class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-4 mb-6 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
         <div>
+            <div class="flex items-center gap-2 mb-1">
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-blue-500/10 text-blue-500 border border-blue-500/20">System Logs</span>
+            </div>
             <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Audit Logs</h2>
             <?php if ($filter_action !== 'All' && !empty($filter_action)): ?>
-                <p class="text-sm text-slate-400 mt-1">
-                    Showing <span
-                        class="text-primary font-bold"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $filter_action))) ?></span>
-                    statistics
+                <p class="text-xs text-slate-400 mt-0.5">
+                    Showing <span class="text-primary font-bold"><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $filter_action))) ?></span> statistics
                 </p>
             <?php else: ?>
-                <p class="text-sm text-slate-500 mt-1">View system activity and changes.</p>
+                <p class="text-xs text-slate-400 mt-0.5">Comprehensive activity trail and administrative event logs</p>
             <?php endif; ?>
         </div>
     </header>
 
     <!-- Update Statistics -->
     <?php
-    // Dynamic label based on filter
     $action_label = ($filter_action !== 'All' && !empty($filter_action))
         ? ucfirst(str_replace('_', ' ', $filter_action))
         : 'Updates';
     ?>
-    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6 no-print">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">IP <?= $action_label ?>
-                    </div>
-                    <div class="text-2xl font-bold text-emerald-500"><?= number_format($stats['ip'] ?? 0) ?></div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-emerald-500/20">dns</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">IP <?= $action_label ?></span>
+                <span class="material-symbols-outlined text-emerald-500 text-base">dns</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-emerald-500"><?= number_format($stats['ip'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">Network events</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Router
-                        <?= $action_label ?>
-                    </div>
-                    <div class="text-2xl font-bold text-blue-500"><?= number_format($stats['router'] ?? 0) ?></div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-blue-500/20">router</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Router <?= $action_label ?></span>
+                <span class="material-symbols-outlined text-blue-500 text-base">router</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-blue-500"><?= number_format($stats['router'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">Routing events</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Switch
-                        <?= $action_label ?>
-                    </div>
-                    <div class="text-2xl font-bold text-purple-500"><?= number_format($stats['switch'] ?? 0) ?></div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-purple-500/20">hub</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Switch <?= $action_label ?></span>
+                <span class="material-symbols-outlined text-purple-500 text-base">hub</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-purple-400"><?= number_format($stats['switch'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">Switching events</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">User
-                        <?= $action_label ?>
-                    </div>
-                    <div class="text-2xl font-bold text-amber-500"><?= number_format($stats['user'] ?? 0) ?></div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-amber-500/20">person</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">User <?= $action_label ?></span>
+                <span class="material-symbols-outlined text-amber-500 text-base">person</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-amber-500"><?= number_format($stats['user'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">User account events</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Reconcile
-                        <?= $action_label ?>
-                    </div>
-                    <div class="text-2xl font-bold text-cyan-500"><?= number_format($stats['reconciliation'] ?? 0) ?>
-                    </div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-cyan-500/20">sync_alt</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Reconcile <?= $action_label ?></span>
+                <span class="material-symbols-outlined text-cyan-500 text-base">sync_alt</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-cyan-400"><?= number_format($stats['reconciliation'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">Data sync events</span>
         </div>
     </div>
 
-    <!-- Filters -->
-    <div class="mb-6 flex gap-3">
-        <form method="GET" class="flex items-center gap-3 flex-wrap w-full">
-            <div class="relative group">
-                <span
-                    class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500">search</span>
-                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>"
-                    placeholder="Search logs..."
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 text-xs rounded-xl pl-9 pr-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent w-64">
+    <!-- Filters / Control Bar -->
+    <div class="bg-white dark:bg-[#161d2b] p-3 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm mb-4 no-print">
+        <form method="GET" class="flex flex-wrap items-center gap-2">
+            <div class="relative flex-1 min-w-[200px]">
+                <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>" placeholder="Search logs..." class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-primary">
             </div>
             <input type="hidden" name="action"   id="hid_lg_action"   value="<?= htmlspecialchars($filter_action) ?>">
             <input type="hidden" name="resource" id="hid_lg_resource" value="<?= htmlspecialchars($filter_resource) ?>">
@@ -212,18 +193,16 @@ require_once '../../includes/sidebar.php';
             elseif($filter_resource!=='All'&&$filter_resource!==''){$lg_ac='resource';$lg_av=$filter_resource;$lg_al=ucfirst($filter_resource);}
             elseif($filter_user!=='All'&&$filter_user!=='')  {$lg_ac='user';    $lg_av=$filter_user;    $lg_al=$filter_user;}
             ?>
-            <select id="lg_cat" onchange="lgOnCat(this.value)"
-                class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
+            <select id="lg_cat" onchange="lgOnCat(this.value)" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                 <option value="">Filter by...</option>
                 <option value="action"   <?= $lg_ac==='action'  ?'selected':'' ?>>Action</option>
                 <option value="resource" <?= $lg_ac==='resource'?'selected':'' ?>>Resource</option>
                 <option value="user"     <?= $lg_ac==='user'    ?'selected':'' ?>>User</option>
             </select>
-            <select id="lg_val" onchange="lgApply(this.value)"
-                class="<?= $lg_ac?'':'hidden' ?> bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary max-w-[200px]">
+            <select id="lg_val" onchange="lgApply(this.value)" class="<?= $lg_ac?'':'hidden' ?> px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary max-w-[200px]">
             </select>
             <?php if($lg_ac): ?>
-            <div class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary text-xs font-semibold rounded-xl">
+            <div class="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary text-xs font-semibold rounded-lg">
                 <span class="material-symbols-outlined text-[13px]">filter_alt</span>
                 <?= htmlspecialchars($lg_al) ?>
                 <a href="?search=<?= urlencode($search_term) ?>&limit=<?= urlencode($limit_param) ?>" class="ml-1 text-primary/60 hover:text-red-500" title="Clear">
@@ -268,64 +247,38 @@ require_once '../../includes/sidebar.php';
             <!-- Date Range Filter -->
             <div class="flex items-center gap-1.5">
                 <span class="material-symbols-outlined text-[16px] text-slate-400">calendar_month</span>
-                <input type="date" name="date_from" id="dateFrom"
-                    value="<?= htmlspecialchars($filter_date_from) ?>"
-                    title="From date"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent">
-                <span class="text-xs text-slate-400">–</span>
-                <input type="date" name="date_to" id="dateTo"
-                    value="<?= htmlspecialchars($filter_date_to) ?>"
-                    title="To date"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent">
+                <input type="date" name="date_from" id="dateFrom" value="<?= htmlspecialchars($filter_date_from) ?>" title="From date" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <span class="text-xs text-slate-400">&ndash;</span>
+                <input type="date" name="date_to" id="dateTo" value="<?= htmlspecialchars($filter_date_to) ?>" title="To date" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
             </div>
 
-            <!-- Clear Filters (shown when any filter is active) -->
-            <?php if ($filter_user !== 'All' || !empty($filter_date_from) || !empty($filter_date_to)): ?>
-                <a href="?action=<?= urlencode($filter_action) ?>&resource=<?= urlencode($filter_resource) ?>&search=<?= urlencode($search_term) ?>&limit=<?= $limit_param ?>"
-                    class="flex items-center gap-1 text-xs text-slate-400 hover:text-red-400 transition-colors whitespace-nowrap">
-                    <span class="material-symbols-outlined text-[15px]">close</span>
-                    Clear date/user
+            <select name="limit" onchange="this.form.submit()" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>15</option>
+                <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>50</option>
+                <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>100</option>
+                <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>200</option>
+                <option value="500" <?= $limit_param == '500' ? 'selected' : '' ?>>500</option>
+                <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>All</option>
+            </select>
+
+            <button type="submit" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white transition-all shadow-sm">
+                Filter
+            </button>
+
+            <!-- Clear Filters -->
+            <?php if ($filter_user !== 'All' || !empty($filter_date_from) || !empty($filter_date_to) || $search_term || $lg_ac): ?>
+                <a href="index.php" class="px-2.5 py-1.5 text-xs font-medium text-red-500 hover:text-red-600 transition-colors">
+                    Clear
                 </a>
             <?php endif; ?>
 
             <!-- Top Pagination -->
             <?php if ($total_pages > 1): ?>
-                <div class="flex items-center gap-2 ml-auto">
-                    <span class="text-xs text-slate-500 mr-2">Page
-                        <?= $page ?> of
-                        <?= $total_pages ?>
-                    </span>
-                    <div
-                        class="flex h-9 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-xl overflow-hidden mr-2">
-                        <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&action=<?= urlencode($filter_action) ?>&resource=<?= urlencode($filter_resource) ?>&user=<?= urlencode($filter_user) ?>&date_from=<?= urlencode($filter_date_from) ?>&date_to=<?= urlencode($filter_date_to) ?>&limit=<?= $limit ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-r border-slate-200 dark:border-[#232b3d] <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_left</span>
-                        </a>
-                        <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&action=<?= urlencode($filter_action) ?>&resource=<?= urlencode($filter_resource) ?>&user=<?= urlencode($filter_user) ?>&date_from=<?= urlencode($filter_date_from) ?>&date_to=<?= urlencode($filter_date_to) ?>&limit=<?= $limit ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_right</span>
-                        </a>
-                    </div>
-                    <select name="limit" onchange="this.form.submit()"
-                        class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
-                        <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                        <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                        <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                        <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>Show: 200</option>
-                        <option value="500" <?= $limit_param == '500' ? 'selected' : '' ?>>Show: 500</option>
-                        <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                    </select>
+                <div class="ml-auto flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Page <?= $page ?> of <?= $total_pages ?></span>
+                    <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&action=<?= urlencode($filter_action) ?>&resource=<?= urlencode($filter_resource) ?>&user=<?= urlencode($filter_user) ?>&date_from=<?= urlencode($filter_date_from) ?>&date_to=<?= urlencode($filter_date_to) ?>&limit=<?= $limit ?>" class="p-1 rounded bg-slate-100 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 <?= $page <= 1 ? 'pointer-events-none opacity-40' : 'hover:bg-slate-200 dark:hover:bg-[#232b3d]' ?>"><span class="material-symbols-outlined text-sm block">chevron_left</span></a>
+                    <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&action=<?= urlencode($filter_action) ?>&resource=<?= urlencode($filter_resource) ?>&user=<?= urlencode($filter_user) ?>&date_from=<?= urlencode($filter_date_from) ?>&date_to=<?= urlencode($filter_date_to) ?>&limit=<?= $limit ?>" class="p-1 rounded bg-slate-100 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 <?= $page >= $total_pages ? 'pointer-events-none opacity-40' : 'hover:bg-slate-200 dark:hover:bg-[#232b3d]' ?>"><span class="material-symbols-outlined text-sm block">chevron_right</span></a>
                 </div>
-            <?php else: ?>
-                <select name="limit" onchange="this.form.submit()"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary ml-auto">
-                    <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                    <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                    <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                    <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>Show: 200</option>
-                    <option value="500" <?= $limit_param == '500' ? 'selected' : '' ?>>Show: 500</option>
-                    <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                </select>
             <?php endif; ?>
         </form>
     </div>

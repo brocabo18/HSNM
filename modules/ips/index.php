@@ -147,6 +147,18 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
 }
 
 // Handle CSV Export
+// --- CSV Template Download ---
+if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="ips_template.csv"');
+    $output = fopen('php://output', 'w');
+    fputs($output, "\xEF\xBB\xBF");
+    fputcsv($output, ['ID', 'IP Address', 'MAC Address', 'Hostname', 'Control Number', 'Location', 'OM Name', 'Status', 'Device Type', 'Description', 'Remarks', 'Subnet ID']);
+    fputcsv($output, ['', '192.168.1.50', '00-1A-2B-3C-4D-5E', 'PC-ACCTG01', 'JBL-PC001', 'Capiz 2F Accounting', 'OM-01', 'active', 'Workstation', 'Accounting Desktop', 'In service', '']);
+    fclose($output);
+    exit;
+}
+
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     try {
         // Safe sort: try inet cast but fall back gracefully for non-standard IPs
@@ -959,177 +971,180 @@ require_once '../../includes/sidebar.php';
 ?>
 
 <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark">
-    <header
-        class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+    <?php 
+    $active_ip_tab = 'main';
+    require __DIR__ . '/../../includes/satellite_ip_tabs.php';
+    ?>
+    <!-- Header -->
+    <header class="mb-6 flex flex-col md:flex-row items-start md:items-end justify-between gap-4">
         <div>
-            <h2 class="text-2xl font-bold text-slate-900 dark:text-white">IP Inventory</h2>
-            <p class="text-sm text-slate-500 mt-1">Manage IP addresses and subnets.</p>
+            <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">Network IP</span>
+                <h2 class="text-2xl font-bold text-slate-900 dark:text-white">IP Address Inventory</h2>
+            </div>
+            <p class="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                <span>Hospital Main IP address inventory pool and allocations.</span>
+                <span class="text-slate-300 dark:text-slate-600">&bull;</span>
+                <a href="../computers/index.php" class="text-primary hover:underline font-semibold inline-flex items-center gap-1">
+                    <span>View Computer Inventory</span>
+                    <span class="material-symbols-outlined text-[13px]">arrow_forward</span>
+                </a>
+            </p>
         </div>
-        <div class="no-print flex items-center gap-2 md:gap-3 flex-wrap">
+        <div class="no-print flex items-center gap-2 flex-wrap">
+            <button onclick="toggleModal('addIpModal')"
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3.5 bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[17px]">add</span>
+                <span>Add IP</span>
+            </button>
+            <button onclick="toggleModal('importModal')"
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[17px]">upload_file</span>
+                <span>Import CSV</span>
+            </button>
             <a href="?export=excel"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-emerald-600 text-white hover:bg-emerald-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">table_view</span> Export Excel
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[17px]">table_chart</span>
+                <span>Export Excel</span>
             </a>
             <a href="?export=csv"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-blue-600 text-white hover:bg-blue-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">download</span> Export CSV
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[17px]">download</span>
+                <span>Export CSV</span>
             </a>
-            <form method="POST"
-                onsubmit="return confirm('Run batch check to set Device Type to Workstation for all JBL- control numbers?');">
+            <button onclick="runArpScan()"
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all shadow-sm" title="Scan local network for active ARP entries">
+                <span class="material-symbols-outlined text-[17px]">router</span>
+                <span>ARP Scan</span>
+            </button>
+            <form method="POST" onsubmit="return confirm('Run batch check to set Device Type to Workstation for all JBL- control numbers?');" class="inline">
                 <?= getCsrfInput() ?>
                 <input type="hidden" name="action" value="batch_update_device_types">
                 <button type="submit"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-purple-600 text-white hover:bg-purple-700 transition-colors text-xs font-bold">
-                    <span class="material-symbols-outlined text-[18px] mr-2">sync_alt</span> Sync Types
+                    class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[17px]">sync_alt</span>
+                    <span>Sync Types</span>
                 </button>
             </form>
-            <form method="POST"
-                onsubmit="return confirm('Batch update: set status to Available for all IPs with empty identity fields, and convert any Conflict status to Available?');">
+            <form method="POST" onsubmit="return confirm('Batch update: set status to Available for all IPs with empty identity fields, and convert any Conflict status to Available?');" class="inline">
                 <?= getCsrfInput() ?>
                 <input type="hidden" name="action" value="batch_update_available_status">
                 <button type="submit"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-cyan-600 text-white hover:bg-cyan-700 transition-colors text-xs font-bold">
-                    <span class="material-symbols-outlined text-[18px] mr-2">dns</span> Sync Available
+                    class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[17px]">dns</span>
+                    <span>Sync Available</span>
                 </button>
             </form>
-            <button onclick="runArpScan()"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-teal-600 text-white hover:bg-teal-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">router</span> ARP Scan
-            </button>
-            <button onclick="toggleModal('importModal')"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-amber-600 text-white hover:bg-amber-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">upload</span> Import CSV
-            </button>
             <button onclick="printData()"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-slate-600 text-white hover:bg-slate-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">print</span> Print
-            </button>
-            <button onclick="toggleModal('addIpModal')"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-primary text-white hover:bg-primary/90 transition-colors text-xs font-bold shadow-lg shadow-primary/20">
-                <span class="material-symbols-outlined text-[18px] mr-2">add</span> Add IP
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all text-xs font-bold shadow-sm">
+                <span class="material-symbols-outlined text-[17px]">print</span>
+                <span>Print</span>
             </button>
         </div>
     </header>
 
     <?php if ($success_msg): ?>
-        <div
-            class="mb-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">check_circle</span>
-            <?= htmlspecialchars($success_msg) ?>
+        <div class="mb-5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[18px]">check_circle</span>
+                <span><?= htmlspecialchars($success_msg) ?></span>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-emerald-500 hover:text-emerald-400">
+                <span class="material-symbols-outlined text-[16px]">close</span>
+            </button>
         </div>
     <?php endif; ?>
     <?php if ($error_msg): ?>
-        <div
-            class="mb-6 bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">error</span>
-            <?= htmlspecialchars($error_msg) ?>
+        <div class="mb-5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[18px]">error</span>
+                <span><?= htmlspecialchars($error_msg) ?></span>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-400">
+                <span class="material-symbols-outlined text-[16px]">close</span>
+            </button>
         </div>
     <?php endif; ?>
 
-    <!-- Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total IPs</div>
-            <div class="text-2xl font-bold text-slate-900 dark:text-white">
-                <?= number_format($total_ips) ?>
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Total IPs</span>
+                <span class="material-symbols-outlined text-primary text-[18px]">dns</span>
             </div>
+            <div class="text-2xl font-bold text-slate-800 dark:text-white mt-1"><?= number_format($total_ips) ?></div>
+            <span class="text-[10px] text-slate-400">Hospital main address pool</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Active IPs</div>
-            <div class="text-2xl font-bold text-emerald-500">
-                <?= number_format($active_ips) ?>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Active IPs</span>
+                <span class="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
             </div>
+            <div class="text-2xl font-bold text-emerald-500 mt-1"><?= number_format($active_ips) ?></div>
+            <span class="text-[10px] text-slate-400">Assigned & online</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Available</div>
-            <div class="text-2xl font-bold text-cyan-400">
-                <?= number_format($available_ips) ?>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Available IPs</span>
+                <span class="material-symbols-outlined text-blue-500 text-[18px]">radio_button_unchecked</span>
             </div>
+            <div class="text-2xl font-bold text-blue-500 mt-1"><?= number_format($available_ips) ?></div>
+            <span class="text-[10px] text-slate-400">Ready for allocation</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Offline</div>
-            <div class="text-2xl font-bold text-orange-400">
-                <?= number_format($offline_ips) ?>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Offline IPs</span>
+                <span class="material-symbols-outlined text-amber-500 text-[18px]">power_off</span>
             </div>
+            <div class="text-2xl font-bold text-amber-500 mt-1"><?= number_format($offline_ips) ?></div>
+            <span class="text-[10px] text-slate-400">Unreachable / inactive</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Reserved</div>
-            <div class="text-2xl font-bold text-purple-400">
-                <?= number_format($reserved_ips) ?>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm col-span-2 sm:col-span-1">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Reserved IPs</span>
+                <span class="material-symbols-outlined text-purple-400 text-[18px]">bookmark</span>
             </div>
+            <div class="text-2xl font-bold text-purple-400 mt-1"><?= number_format($reserved_ips) ?></div>
+            <span class="text-[10px] text-slate-400">Static / infrastructure</span>
         </div>
     </div>
 
 
     <!-- Control Bar -->
-    <div class="no-print mb-6 flex gap-3">
-        <form method="GET" class="flex items-center gap-3 flex-wrap w-full">
-            <div class="relative group">
-                <span
-                    class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500">search</span>
-                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>"
-                    placeholder="Search..."
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 text-xs rounded-xl pl-9 pr-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent w-64">
+    <!-- Control Bar -->
+    <div class="bg-white dark:bg-[#161d2b] p-3 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm mb-4 no-print">
+        <form method="GET" class="flex flex-wrap items-center gap-2">
+            <div class="relative flex-1 min-w-[220px]">
+                <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
+                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>" placeholder="Search IP, MAC, Hostname, Control#, Location..."
+                    class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-800 dark:text-slate-200 focus:outline-none focus:border-primary">
             </div>
-            <input type="hidden" name="subnet" id="hid_subnet" value="<?= htmlspecialchars($filter_subnet) ?>">
-            <input type="hidden" name="status" id="hid_status" value="<?= htmlspecialchars($filter_status) ?>">
-            <?php
-            $sn_map=[]; $sn_js=[];
-            foreach($subnets as $sn){
-                $lbl=$sn['name'].' ('.$sn['cidr'].')';
-                $sn_map[$sn['id']]=$lbl;
-                $sn_js[]=['val'=>(string)$sn['id'],'label'=>$lbl];
-            }
-            $ip_ac=''; $ip_av=''; $ip_al='';
-            if($filter_subnet!=='All'&&$filter_subnet!==''){$ip_ac='subnet';$ip_av=$filter_subnet;$ip_al=$sn_map[$filter_subnet]??$filter_subnet;}
-            elseif($filter_status!=='All'&&$filter_status!==''){$ip_ac='status';$ip_av=$filter_status;$ip_al=ucfirst($filter_status);}
-            ?>
-            <select id="ip_cat" onchange="ipOnCat(this.value)"
-                class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
-                <option value="">Filter by...</option>
-                <option value="subnet" <?= $ip_ac==='subnet'?'selected':'' ?>>Subnet</option>
-                <option value="status" <?= $ip_ac==='status'?'selected':'' ?>>Status</option>
-            </select>
-            <select id="ip_val" onchange="ipApply(this.value)"
-                class="<?= $ip_ac?'':'hidden' ?> bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary max-w-[220px]">
-            </select>
-            <?php if($ip_ac): ?>
-            <div class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary text-xs font-semibold rounded-xl">
-                <span class="material-symbols-outlined text-[13px]">filter_alt</span>
-                <?= htmlspecialchars($ip_al) ?>
-                <a href="?search=<?= urlencode($search_term) ?>&sort=<?= urlencode($sort_by) ?>&limit=<?= urlencode($limit_param) ?>" class="ml-1 text-primary/60 hover:text-red-500" title="Clear">
-                    <span class="material-symbols-outlined text-[14px]">close</span>
-                </a>
-            </div>
-            <?php endif; ?>
-            <script>
-            const _ipO={
-                subnet:<?= json_encode($sn_js) ?>,
-                status:[{val:'active',label:'Active'},{val:'available',label:'Available'},{val:'reserved',label:'Reserved'},{val:'offline',label:'Offline'}]
-            };
-            const _ipAC=<?= json_encode($ip_ac) ?>,_ipAV=<?= json_encode($ip_av) ?>;
-            function ipOnCat(c){
-                const v=document.getElementById('ip_val');
-                if(!c){v.classList.add('hidden');return;}
-                ['subnet','status'].forEach(function(k){if(k!==c){const h=document.getElementById('hid_'+k);if(h)h.value='All';}});
-                v.innerHTML='<option value="All">All</option>';
-                (_ipO[c]||[]).forEach(function(o){
-                    const val=typeof o==='object'?o.val:o,lbl=typeof o==='object'?o.label:o;
-                    const e=document.createElement('option');e.value=val;e.textContent=lbl;
-                    if(c===_ipAC&&val===_ipAV)e.selected=true;v.appendChild(e);
-                });
-                v.classList.remove('hidden');
-            }
-            function ipApply(val){
-                const c=document.getElementById('ip_cat').value;if(!c)return;
-                document.getElementById('hid_'+c).value=val;
-                document.getElementById('ip_cat').closest('form').submit();
-            }
-            document.addEventListener('DOMContentLoaded',function(){if(_ipAC)ipOnCat(_ipAC);});
-            </script>
 
+            <!-- Subnet Filter -->
+            <select name="subnet" onchange="this.form.submit()"
+                class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="All" <?= $filter_subnet === 'All' ? 'selected' : '' ?>>All Subnets</option>
+                <?php foreach ($subnets as $sn): ?>
+                    <option value="<?= htmlspecialchars($sn['id']) ?>" <?= (string)$filter_subnet === (string)$sn['id'] ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($sn['name']) ?> (<?= htmlspecialchars($sn['cidr']) ?>)
+                    </option>
+                <?php endforeach; ?>
+            </select>
+
+            <!-- Status Filter -->
+            <select name="status" onchange="this.form.submit()"
+                class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="All" <?= $filter_status === 'All' ? 'selected' : '' ?>>All Status</option>
+                <option value="active" <?= $filter_status === 'active' ? 'selected' : '' ?>>Active</option>
+                <option value="available" <?= $filter_status === 'available' ? 'selected' : '' ?>>Available</option>
+                <option value="offline" <?= $filter_status === 'offline' ? 'selected' : '' ?>>Offline</option>
+                <option value="reserved" <?= $filter_status === 'reserved' ? 'selected' : '' ?>>Reserved</option>
+            </select>
+
+            <!-- Sort -->
             <select name="sort" onchange="this.form.submit()"
-                class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
+                class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                 <option value="ip_asc" <?= $sort_by === 'ip_asc' ? 'selected' : '' ?>>IP (Asc)</option>
                 <option value="ip_desc" <?= $sort_by === 'ip_desc' ? 'selected' : '' ?>>IP (Desc)</option>
                 <option value="hostname_asc" <?= $sort_by === 'hostname_asc' ? 'selected' : '' ?>>Hostname (A-Z)</option>
@@ -1140,44 +1155,19 @@ require_once '../../includes/sidebar.php';
                 <option value="location_desc" <?= $sort_by === 'location_desc' ? 'selected' : '' ?>>Location (Z-A)</option>
             </select>
 
-            <!-- Top Pagination -->
-            <?php if ($total_pages > 1): ?>
-                <div class="flex items-center gap-2 ml-auto">
-                    <span class="text-xs text-slate-500 mr-2">Page
-                        <?= $page ?> of
-                        <?= $total_pages ?>
-                    </span>
-                    <div
-                        class="flex h-9 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-xl overflow-hidden mr-2">
-                        <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&subnet=<?= urlencode($filter_subnet) ?>&status=<?= urlencode($filter_status) ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-r border-slate-200 dark:border-[#232b3d] <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_left</span>
-                        </a>
-                        <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&subnet=<?= urlencode($filter_subnet) ?>&status=<?= urlencode($filter_status) ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_right</span>
-                        </a>
-                    </div>
-                    <select name="limit" onchange="this.form.submit()"
-                        class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
-                        <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                        <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                        <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                        <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>Show: 200</option>
-                        <option value="500" <?= $limit_param == '500' ? 'selected' : '' ?>>Show: 500</option>
-                        <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                    </select>
-                </div>
-            <?php else: ?>
-                <select name="limit" onchange="this.form.submit()"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary ml-auto">
-                    <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                    <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                    <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                    <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>Show: 200</option>
-                    <option value="500" <?= $limit_param == '500' ? 'selected' : '' ?>>Show: 500</option>
-                    <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                </select>
+            <!-- Per page -->
+            <select name="limit" onchange="this.form.submit()"
+                class="px-2 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>15</option>
+                <option value="25" <?= $limit_param == '25' ? 'selected' : '' ?>>25</option>
+                <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>50</option>
+                <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>100</option>
+                <option value="all" <?= $limit_param === 'all' ? 'selected' : '' ?>>All</option>
+            </select>
+
+            <button type="submit" class="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-[#232b3d] hover:bg-slate-300 dark:hover:bg-[#2e384e] text-slate-700 dark:text-slate-300 text-xs font-bold transition-all">Filter</button>
+            <?php if ($search_term !== '' || $filter_subnet !== 'All' || $filter_status !== 'All'): ?>
+                <a href="index.php" class="px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 text-xs font-semibold">Clear</a>
             <?php endif; ?>
         </form>
     </div>
@@ -1418,23 +1408,46 @@ require_once '../../includes/sidebar.php';
 <!-- Import Modal -->
 <div id="importModal" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog">
     <div class="flex items-center justify-center min-h-screen px-4">
-        <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
-        <div
-            class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-lg w-full p-4 sm:p-6 shadow-2xl">
-            <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-4">Import IPs from CSV</h3>
-            <p class="text-sm text-slate-400 mb-4">Upload a CSV file with columns: IP Address, MAC Address, Hostname,
-                Control Number, Department, OM Name, Status, Device Type, Description, Remarks, Subnet ID</p>
-            <form method="POST" enctype="multipart/form-data">
+        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
+        <div class="relative bg-white dark:bg-[#1a2130] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200 dark:border-[#232b3d]">
+            <div class="flex items-center justify-between border-b border-slate-200 dark:border-[#232b3d] pb-3 mb-4">
+                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span class="material-symbols-outlined text-amber-600">upload_file</span> Import IPs from CSV
+                </h3>
+                <button type="button" onclick="toggleModal('importModal')" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+
+            <form method="POST" enctype="multipart/form-data" class="space-y-4">
                 <?= getCsrfInput() ?>
                 <input type="hidden" name="action" value="import_csv">
-                <div class="mb-4">
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select CSV File</label>
                     <input type="file" name="csv_file" accept=".csv" required
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-white rounded-xl px-4 py-2.5 text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-slate-900 dark:text-white hover:file:bg-primary/90">
+                        class="w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500/10 file:text-amber-600 hover:file:bg-amber-500/20 file:cursor-pointer border border-slate-200 dark:border-[#232b3d] rounded-xl p-2 bg-slate-50 dark:bg-[#101622]">
                 </div>
-                <div class="flex justify-end gap-3">
-                    <button type="button" onclick="toggleModal('importModal')"
-                        class="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">Cancel</button>
-                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl">Import</button>
+
+                <div class="p-3 bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl text-xs space-y-1 text-slate-600 dark:text-slate-400">
+                    <p class="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-[16px] text-amber-500">info</span> Supported Formats:
+                    </p>
+                    <p>&bull; Standard IP Address CSV format (11/12 columns matching system export).</p>
+                    <p>&bull; Existing IPs will automatically update MAC, Hostname, Control Number &amp; Location.</p>
+                    <p>&bull; Supported status values: active, available, offline, reserved.</p>
+                    <div class="pt-2">
+                        <a href="?download_template=csv" class="inline-flex items-center gap-1 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
+                            <span class="material-symbols-outlined text-[14px]">download</span> Download CSV Template
+                        </a>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-[#232b3d]">
+                    <button type="button" onclick="toggleModal('importModal')" class="px-5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-[#232b3d] transition-colors">Cancel</button>
+                    <button type="submit" class="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 flex items-center gap-1.5 shadow-sm transition-colors">
+                        <span class="material-symbols-outlined text-[16px]">upload</span> Upload &amp; Import
+                    </button>
                 </div>
             </form>
         </div>

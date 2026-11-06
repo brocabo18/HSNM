@@ -2,11 +2,12 @@
 /**
  * HSNM Database Comparison Tool
  * Compares LOCAL database row counts with RAILWAY database row counts
- * Access: http://192.163.10.11/HSNM/db_compare.php (localhost only)
+ * Access: http://[local-server]/HSNM/db_compare.php (localhost only)
  */
 
-// Security: localhost only
-$allowed = in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1', '192.163.10.11']);
+// Security: localhost only — LOCAL_HOST_IP env var holds the real server IP, never hardcoded in source
+$_local_ip = getenv('LOCAL_HOST_IP') ?: '';
+$allowed = in_array($_SERVER['REMOTE_ADDR'] ?? '', array_filter(['127.0.0.1', '::1', $_local_ip]));
 // Remove restriction for now to allow access from any machine on the network
 // if (!$allowed) { http_response_code(403); die("Access denied."); }
 
@@ -112,7 +113,7 @@ foreach ($tables as $table => $label) {
 </head>
 <body>
     <h1>🔍 HSNM Database Comparison</h1>
-    <p class="sub">Local (192.163.10.11) vs Railway (hsnm-main.up.railway.app)</p>
+    <p class="sub">Local (<?= htmlspecialchars($_SERVER['SERVER_NAME'] ?? 'local-server') ?>) vs Railway (hsnm-main.up.railway.app)</p>
 
     <?php if ($railwayError): ?>
     <div class="alert">
@@ -163,7 +164,7 @@ foreach ($tables as $table => $label) {
         <h2>🛠️ How to Fix: Sync Local → Railway</h2>
         <ol>
             <li>Run the export script locally to generate a fresh SQL dump:<br>
-                <code>http://192.163.10.11/HSNM/database/export.php</code>
+                <code>http://<?= htmlspecialchars($_SERVER['SERVER_NAME'] ?? 'local-server') ?>/HSNM/database/export.php</code>
             </li>
             <li>Then import using the bat file:<br>
                 <code>C:\xampp\htdocs\HSNM\database\import_railway.bat</code>

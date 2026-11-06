@@ -31,7 +31,7 @@ if (empty($items)) {
     <title>Inventory Custodian Slip</title>
     <link rel="icon" type="image/svg+xml" href="<?= BASE_URL ?>/assets/favicon.svg">
     <!-- Use Tailwind for consistency but custom styles for precise print layout -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="<?= BASE_URL ?>/assets/js/tailwind.js"></script>
     <style>
         @media print {
             @page {

@@ -7,11 +7,15 @@ require_once 'includes/header.php';
 <?php
 $sql_file = __DIR__ . '/database/add_status_and_satellite_tables.sql';
 $sql = file_get_contents($sql_file);
-$statements = array_filter(array_map('trim', explode(';', $sql)), fn($s) => !empty($s) && !str_starts_with(ltrim($s), '--'));
 $errors = [];
 $success_count = 0;
-foreach ($statements as $stmt) {
-    $stmt = trim($stmt);
+foreach (explode(';', $sql) as $stmt) {
+    // Strip comment lines, then check if anything executable remains
+    $lines = array_filter(
+        explode("\n", $stmt),
+        fn($line) => !str_starts_with(ltrim($line), '--')
+    );
+    $stmt = trim(implode("\n", $lines));
     if (empty($stmt)) continue;
     try {
         $pdo->exec($stmt);

@@ -178,6 +178,36 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
 
 // CSV Export
 
+// --- CSV Template Download ---
+if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="computers_template.csv"');
+    $output = fopen('php://output', 'w');
+    fputs($output, "\xEF\xBB\xBF");
+    fputcsv($output, [
+        'Building', 'Floor', 'Department', 'End User', 'MR/PAR', 'Control Number',
+        'System Unit', 'System Unit S/N', 'Monitor', 'Monitor S/N',
+        'Mouse', 'Mouse S/N', 'Keyboard', 'Keyboard S/N',
+        'Printer', 'Printer S/N', 'Scanner', 'Scanner S/N',
+        'AVR/UPS', 'AVR/UPS S/N', 'Processor', 'Memory', 'Storage',
+        'OS', 'OS Product Key', 'License', 'Microsoft Office', 'MS Office Email',
+        'IP Address', 'MAC Address', 'Endpoint Secure', 'Firewall',
+        'Checked By', 'Encoded By', 'Remarks'
+    ]);
+    fputcsv($output, [
+        'Capiz', '2F', 'Accounting', 'Juan Dela Cruz', 'PAR-001', 'JBL-ACCT-PC001',
+        'Dell OptiPlex 7090', 'SN12345678', 'Dell 24" LED', 'MON1234',
+        'Logitech Optical', 'MS1234', 'Logitech USB', 'KB1234',
+        'Canon PIXMA G3010', 'PRN1234', 'None', 'None',
+        'APC 650VA', 'UPS1234', 'Intel Core i5-11400', '16GB DDR4', '512GB NVMe SSD',
+        'Windows 11 Pro 64-bit', 'XXXXX-XXXXX-XXXXX-XXXXX', 'Yes', 'Microsoft Office 2021', 'acctg@hospital.gov.ph',
+        '192.168.1.50', '00-1A-2B-3C-4D-5E', 'Yes', 'Yes',
+        'Engr. Santos', 'Admin', 'Active workstation'
+    ]);
+    fclose($output);
+    exit;
+}
+
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv');
     header('Content-Disposition: attachment; filename="computers_export_' . date('Y-m-d_His') . '.csv"');
@@ -337,6 +367,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
             $is_new_format = (isset($header[0]) && strtolower($header[0]) === 'building');
 
             while (($row = fgetcsv($handle)) !== false) {
+                $row = array_map(function($val) {
+                    $val = trim((string)$val);
+                    if (!mb_check_encoding($val, 'UTF-8')) {
+                        return mb_convert_encoding($val, 'UTF-8', 'Windows-1252');
+                    }
+                    return $val;
+                }, $row);
+                if (empty(array_filter($row, fn($v) => $v !== ''))) continue;
                 $col_count = count($row);
 
                 if ($is_new_format) {
@@ -467,6 +505,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
                         $fw_csv_sync->execute([$fw_csv_ctrl, $fw_csv_status, $_SESSION['username'] ?? 'csv_import']);
                     }
 
+                    // Sync IP address to IP module if present
+                    if (!empty($data[26])) {
+                        syncComputerIpToIpModule($pdo, $data[26], $data[27] ?? '', $control_number, $data[0] ?? '');
+                    }
+
                 } catch (Exception $e) {
                     $skipped++;
                     if (count($errors) < 3) { // capture first 3 errors for diagnosis
@@ -551,12 +594,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $floor_val    = $_POST['floor'] ?? '';
                 $dept_text    = $_POST['department'] ?? '';
                 $location_val = trim("$building_val $floor_val $dept_text");
-                $stmt = $pdo->prepare("INSERT INTO computers (department, end_user, mr_par, status, control_number, system_unit, system_unit_sn, monitor, monitor_sn, mouse, mouse_sn, keyboard, keyboard_sn, printer, printer_sn, scanner, scanner_sn, avr_ups, avr_ups_sn, processor, memory, storage, os, os_product_key, license, microsoft_office, ms_office_email, ip_address, mac_address, endpoint_secure, firewall, checked_by, encoded_by, remarks, remarks_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $new_status = $_POST['status'] ?? 'Working';
+                $new_transferred_to = ($new_status === 'Transferred') ? ($_POST['transferred_to'] ?? null) : null;
+                $stmt = $pdo->prepare("INSERT INTO computers (department, end_user, mr_par, status, transferred_to, control_number, system_unit, system_unit_sn, monitor, monitor_sn, mouse, mouse_sn, keyboard, keyboard_sn, printer, printer_sn, scanner, scanner_sn, avr_ups, avr_ups_sn, processor, memory, storage, os, os_product_key, license, microsoft_office, ms_office_email, ip_address, mac_address, endpoint_secure, firewall, checked_by, encoded_by, remarks, remarks_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $stmt->execute([
                     $location_val,
                     $_POST['end_user'],
                     $_POST['mr_par'],
-                    $_POST['status'] ?? 'Working',
+                    $new_status,
+                    $new_transferred_to,
                     $_POST['control_number'],
                     $_POST['system_unit'],
                     $_POST['system_unit_sn'],
@@ -590,6 +636,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     !empty($_POST['remarks_date']) ? $_POST['remarks_date'] : null,
                 ]);
                 $computer_id = $pdo->lastInsertId();
+
+                // ── If Transferred, copy record to target satellite table ───
+                if ($new_status === 'Transferred' && !empty($new_transferred_to)) {
+                    $table_map = [
+                        'JASMC-ST'    => 'computers_jasmc_st',
+                        'JASMC-VT'    => 'computers_jasmc_vt',
+                        'DOH-JBL-CMC' => 'computers_doh_jbl_cmc',
+                    ];
+                    $target_table = $table_map[$new_transferred_to] ?? null;
+                    if ($target_table) {
+                        try {
+                            $ins_transfer = $pdo->prepare("INSERT INTO $target_table
+                                (department, end_user, mr_par, status, transferred_to, control_number, system_unit, system_unit_sn,
+                                 monitor, monitor_sn, mouse, mouse_sn, keyboard, keyboard_sn, printer, printer_sn,
+                                 scanner, scanner_sn, avr_ups, avr_ups_sn, processor, memory, storage, os, os_product_key,
+                                 license, microsoft_office, ms_office_email, ip_address, mac_address, endpoint_secure,
+                                 firewall, checked_by, encoded_by, remarks, remarks_date, source_computer_id, transferred_at)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())
+                                ON CONFLICT (control_number) DO UPDATE SET
+                                    department=EXCLUDED.department, end_user=EXCLUDED.end_user, mr_par=EXCLUDED.mr_par,
+                                    status=EXCLUDED.status, transferred_to=EXCLUDED.transferred_to,
+                                    system_unit=EXCLUDED.system_unit, system_unit_sn=EXCLUDED.system_unit_sn,
+                                    monitor=EXCLUDED.monitor, monitor_sn=EXCLUDED.monitor_sn,
+                                    mouse=EXCLUDED.mouse, mouse_sn=EXCLUDED.mouse_sn,
+                                    keyboard=EXCLUDED.keyboard, keyboard_sn=EXCLUDED.keyboard_sn,
+                                    printer=EXCLUDED.printer, printer_sn=EXCLUDED.printer_sn,
+                                    scanner=EXCLUDED.scanner, scanner_sn=EXCLUDED.scanner_sn,
+                                    avr_ups=EXCLUDED.avr_ups, avr_ups_sn=EXCLUDED.avr_ups_sn,
+                                    processor=EXCLUDED.processor, memory=EXCLUDED.memory, storage=EXCLUDED.storage,
+                                    os=EXCLUDED.os, os_product_key=EXCLUDED.os_product_key,
+                                    license=EXCLUDED.license, microsoft_office=EXCLUDED.microsoft_office,
+                                    ms_office_email=EXCLUDED.ms_office_email, ip_address=EXCLUDED.ip_address,
+                                    mac_address=EXCLUDED.mac_address, endpoint_secure=EXCLUDED.endpoint_secure,
+                                    firewall=EXCLUDED.firewall, checked_by=EXCLUDED.checked_by,
+                                    encoded_by=EXCLUDED.encoded_by, remarks=EXCLUDED.remarks,
+                                    remarks_date=EXCLUDED.remarks_date, source_computer_id=EXCLUDED.source_computer_id,
+                                    transferred_at=NOW()
+                            ");
+                            $ins_transfer->execute([
+                                $location_val, $_POST['end_user'], $_POST['mr_par'],
+                                'Working', null, $_POST['control_number'],
+                                $_POST['system_unit'], $_POST['system_unit_sn'],
+                                $_POST['monitor'], $_POST['monitor_sn'],
+                                $_POST['mouse'], $_POST['mouse_sn'],
+                                $_POST['keyboard'], $_POST['keyboard_sn'],
+                                $printer_val, $_POST['printer_sn'],
+                                $scanner_val, $_POST['scanner_sn'],
+                                $avr_ups_val, $_POST['avr_ups_sn'],
+                                $_POST['processor'], $_POST['memory'], $_POST['storage'],
+                                $_POST['os'], $_POST['os_product_key'],
+                                $_POST['license'], $_POST['microsoft_office'],
+                                $_POST['ms_office_email'] ?? '', $_POST['ip_address'],
+                                $_POST['mac_address'], $_POST['endpoint_secure'] ?? 'N',
+                                $_POST['firewall'] ?? 'N', $_POST['checked_by'],
+                                $_POST['encoded_by'], $_POST['remarks'],
+                                !empty($_POST['remarks_date']) ? $_POST['remarks_date'] : null,
+                                $computer_id
+                            ]);
+                            logAudit($pdo, 'transfer_computer', "Transferred Computer Control #: {$_POST['control_number']} to $new_transferred_to", 'computer', $computer_id);
+                        } catch (Exception $tr_e) {
+                            error_log("Transfer (add) to $new_transferred_to failed: " . $tr_e->getMessage());
+                        }
+                    }
+                }
                 $dept = $location_val;
                 $end_user = $_POST['end_user'];
                 $ctrl_num = $_POST['control_number'];
@@ -656,6 +766,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         // $error_msg .= " (Office sync failed: " . $e->getMessage() . ")";
                     }
                 }
+
+                // Sync newly added computer to Asset Inventory
+                syncComputerToAsset($pdo, $computer_id);
+
+                // Automatically update IP Address module (ips table) and set status active
+                syncComputerIpToIpModule($pdo, $_POST['ip_address'] ?? '', $_POST['mac_address'] ?? '', $_POST['control_number'] ?? '', $location_val, $dept_text);
             } catch (Exception $e) {
                 $error_msg = "Error adding computer: " . $e->getMessage();
             }
@@ -851,6 +967,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     'department'     => 'Location',
                     'end_user'       => 'End User',
                     'mr_par'         => 'MR/PAR',
+                    'status'         => 'Status',
+                    'transferred_to' => 'Transferred To',
                     'control_number' => 'Control #',
                     'system_unit'    => 'System Unit',
                     'system_unit_sn' => 'System Unit S/N',
@@ -985,6 +1103,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         error_log("Office sync to licenses failed: " . $sync_e->getMessage());
                     }
                 }
+
+                // Sync computer to Asset Inventory
+                $comp_id = (int)($id ?: ($_POST['id'] ?? 0));
+                syncComputerToAsset($pdo, $comp_id);
+
+                // Automatically update IP Address module (ips table) and set status active
+                syncComputerIpToIpModule($pdo, $_POST['ip_address'] ?? '', $_POST['mac_address'] ?? '', $_POST['control_number'] ?? '', $location_val, $dept_text, $old_comp['ip_address'] ?? null);
             } catch (Exception $e) {
                 $error_msg = "Error updating computer: " . $e->getMessage();
             }
@@ -1007,6 +1132,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
         $stmt = $pdo->prepare("DELETE FROM computers WHERE id = ?");
         $stmt->execute([$id]);
+        if ($del_c && !empty($del_c['ip_address'])) {
+            releaseComputerIpInIpModule($pdo, $del_c['ip_address'], $del_c['control_number'] ?? '');
+        }
         logAudit($pdo, 'delete_computer', $del_comp_detail, 'computer', $id);
         /* if ($del_c) logChangelog($pdo, 'bugfix', 'Computer Inventory', "Removed Computer: ...", ...); removed — data changes not tracked in changelog */
         $success_msg = "Computer deleted successfully.";
@@ -1020,6 +1148,7 @@ $is_ajax = isset($_GET['ajax']);
 
 // Fetch Computers with Search, Filter, Sort, and Pagination
 $search_term = $_GET['search'] ?? '';
+$status_filter = $_GET['status'] ?? 'All';
 $department_filter = $_GET['department'] ?? 'All';
 $printer_filter = $_GET['printer'] ?? 'All';
 $printer_sn_filter = $_GET['printer_sn'] ?? 'All';
@@ -1106,6 +1235,11 @@ if ($checked_by_filter !== 'All' && !empty($checked_by_filter)) {
     $params[] = $checked_by_filter;
 }
 
+if ($status_filter !== 'All' && !empty($status_filter)) {
+    $where_clauses[] = "status = ?";
+    $params[] = $status_filter;
+}
+
 $where_sql = implode(' AND ', $where_clauses);
 
 // Sorting
@@ -1144,7 +1278,7 @@ $count_stmt = $pdo->prepare("SELECT COUNT(*) FROM computers WHERE $where_sql");
 $count_stmt->execute($params);
 $total_items = $count_stmt->fetchColumn();
 $total_pages = ceil($total_items / $limit);
-$page_params = "&search=" . urlencode($search_term) . "&department=" . urlencode($department_filter) . "&printer=" . urlencode($printer_filter) . "&printer_sn=" . urlencode($printer_sn_filter) . "&memory=" . urlencode($memory_filter) . "&os=" . urlencode($os_filter) . "&ms_office=" . urlencode($ms_office_filter) . "&checked_by=" . urlencode($checked_by_filter) . "&sort=" . urlencode($sort_by) . "&limit=" . urlencode($limit_param);
+$page_params = "&search=" . urlencode($search_term) . "&status=" . urlencode($status_filter) . "&department=" . urlencode($department_filter) . "&printer=" . urlencode($printer_filter) . "&printer_sn=" . urlencode($printer_sn_filter) . "&memory=" . urlencode($memory_filter) . "&os=" . urlencode($os_filter) . "&ms_office=" . urlencode($ms_office_filter) . "&checked_by=" . urlencode($checked_by_filter) . "&sort=" . urlencode($sort_by) . "&limit=" . urlencode($limit_param);
 
 $sql = "SELECT c.*, last_edit.username AS last_edited_by, last_edit.created_at AS last_edited_at
     FROM computers c
@@ -1162,7 +1296,10 @@ $stmt->execute($params);
 $computers = $stmt->fetchAll();
 
 // Stats
-$total_computers = $pdo->query("SELECT COUNT(*) FROM computers")->fetchColumn();
+$total_computers = (int)($pdo->query("SELECT COUNT(*) FROM computers")->fetchColumn() ?: 0);
+$active_comp_count = (int)($pdo->query("SELECT COUNT(*) FROM computers WHERE status = 'Active' OR status IS NULL OR status = ''")->fetchColumn() ?: 0);
+$maint_comp_count = (int)($pdo->query("SELECT COUNT(*) FROM computers WHERE status = 'Maintenance'")->fetchColumn() ?: 0);
+$with_ip_comp_count = (int)($pdo->query("SELECT COUNT(*) FROM computers WHERE ip_address IS NOT NULL AND ip_address != ''")->fetchColumn() ?: 0);
 
 // Get unique departments
 $departments = $pdo->query("SELECT DISTINCT department FROM computers WHERE department IS NOT NULL AND department != '' ORDER BY department")->fetchAll(PDO::FETCH_COLUMN);
@@ -1199,7 +1336,7 @@ $staff_users = $pdo->query("
 
 // Predefined lists for multi-select dropdowns
 $printer_options = [
-    'MAGICCARD D ID', 'CANON PIXMA G1010', 'CANON PIXMA G2010', 'CANON LBP 2900', 'CANON LBP 6030',
+    'MAGICCARD D ID', 'CANON PIXMA G1010', 'CANON PIXMA G2010', 'CANON PIXMA G3010', 'CANON LBP 2900', 'CANON LBP 6030',
     'EPSON LX-310', 'EPSON LQ-310', 'EPSON L120', 'EPSON L121', 'EPSON L220', 'EPSON L360', 'EPSON L565',
     'EPSON L3110', 'EPSON L3210', 'EPSON L4150', 'EPSON L5190', 'EPSON L5290',
     'EPSON L8050', 'EPSON L805', 'EPSON L15150', 'EPSON L18150',
@@ -1210,7 +1347,7 @@ $scanner_options = [
     'HP SCANJET PRO 4500 FNW1', 'HP SCANJET PRO 4600 FNW1', 'HP SCANJET PRO N4000 SNW1',
     'HP SCANJET PRO N4000 S4', 'HP SCANJET PRO 7000 S3', 'HP SCANJET PRO 3000 S4',
     'HP SCANJET PRO 3000 S3', 'HP SCANJET PRO 2000 S2', 'HP LASERJET PRO N4500',
-    'HP SMART TANK 500', 'CANON LIDE 110', 'CANON PIXMA G1010', 'CANON PIXMA G2010', 'EPSON ES-60W',
+    'HP SMART TANK 500', 'CANON LIDE 110', 'CANON PIXMA G1010', 'CANON PIXMA G2010', 'CANON PIXMA G3010', 'EPSON ES-60W',
     'EPSON L565', 'EPSON L3110', 'EPSON L3210', 'EPSON L4150', 'EPSON L5190',
     'EPSON L5290', 'EPSON L8050', 'EPSON L15150', 'EPSON L18150',
     'BROTHER DCP-T420W', 'BROTHER DCP-T700W', 'BROTHER MFC-T810W',
@@ -1236,69 +1373,105 @@ if (!$is_ajax) {
 <?php if (!$is_ajax): ?>
     <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark">
         <header
-            class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
-            <div>
-                <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Computer Inventory</h2>
-                <p class="text-sm text-slate-500 mt-1">Manage computer systems and peripherals.</p>
-            </div>
-            <div class="no-print flex items-center gap-2 md:gap-3 flex-wrap">
-                <a href="?export=excel" id="exportExcelBtn"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-emerald-600 text-white hover:bg-emerald-700 transition-colors text-xs font-bold">
-                    <span class="material-symbols-outlined text-[18px] mr-2">table_view</span> Export Excel
-                </a>
-                <button onclick="exportSelected()"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-blue-600 text-white hover:bg-blue-700 transition-colors text-xs font-bold">
-                    <span class="material-symbols-outlined text-[18px] mr-2">download</span> Export CSV
-                </button>
-                <button onclick="toggleModal('importModal')"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-amber-600 text-white hover:bg-amber-700 transition-colors text-xs font-bold">
-                    <span class="material-symbols-outlined text-[18px] mr-2">upload</span> Import CSV
-                </button>
-                <button onclick="printData()"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-slate-600 text-white hover:bg-slate-700 transition-colors text-xs font-bold">
-                    <span class="material-symbols-outlined text-[18px] mr-2">print</span> Print
-                </button>
-                <button onclick="toggleModal('addComputerModal')"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-primary text-white hover:bg-primary/90 transition-colors text-xs font-bold shadow-lg shadow-primary/20">
-                    <span class="material-symbols-outlined text-[18px] mr-2">add</span> Add Computer
-                </button>
+            class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-4 mb-6 flex flex-col gap-3 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+            <?php 
+            $active_comp_tab = 'main';
+            require __DIR__ . '/../../includes/satellite_computer_tabs.php';
+            ?>
+            <div class="flex flex-col md:flex-row items-start md:items-end justify-between gap-4 w-full">
+                <div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">Computer Inventory</span>
+                    </div>
+                    <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Computer Inventory</h2>
+                    <p class="text-xs text-slate-400 mt-0.5">Manage hospital computer systems, hardware specifications, and peripherals.</p>
+                </div>
+                <div class="no-print flex items-center gap-2 flex-wrap">
+                    <button onclick="toggleModal('addComputerModal')"
+                        class="flex items-center gap-1.5 px-3.5 h-9 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-sm">
+                        <span class="material-symbols-outlined text-[16px]">add</span> Add Computer
+                    </button>
+                    <button onclick="toggleModal('importModal')"
+                        class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all shadow-sm">
+                        <span class="material-symbols-outlined text-[16px]">upload_file</span> Import CSV
+                    </button>
+                    <a href="?export=excel" id="exportExcelBtn"
+                        class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm">
+                        <span class="material-symbols-outlined text-[16px]">table_view</span> Export Excel
+                    </a>
+                    <button onclick="exportSelected()"
+                        class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-sm">
+                        <span class="material-symbols-outlined text-[16px]">download</span> Export CSV
+                    </button>
+                    <button onclick="printData()"
+                        class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#232b3d] text-xs font-bold transition-all shadow-sm">
+                        <span class="material-symbols-outlined text-[16px]">print</span> Print
+                    </button>
+                </div>
             </div>
         </header>
 
+        <!-- Notification Alerts -->
         <?php if ($success_msg): ?>
-            <div
-                class="mb-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-                <span class="material-symbols-outlined">check_circle</span>
-                <?= htmlspecialchars($success_msg) ?>
+            <div class="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center justify-between no-print">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">check_circle</span>
+                    <?= htmlspecialchars($success_msg) ?>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-emerald-500/60 hover:text-emerald-500"><span class="material-symbols-outlined text-sm">close</span></button>
             </div>
         <?php endif; ?>
         <?php if ($error_msg): ?>
-            <div
-                class="mb-6 bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-                <span class="material-symbols-outlined">error</span>
-                <?= htmlspecialchars($error_msg) ?>
+            <div class="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center justify-between no-print">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">error</span>
+                    <?= htmlspecialchars($error_msg) ?>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-red-500/60 hover:text-red-500"><span class="material-symbols-outlined text-sm">close</span></button>
             </div>
         <?php endif; ?>
 
-        <!-- Stats -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-                <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total Computers</div>
-                <div class="text-2xl font-bold text-slate-900 dark:text-white">
-                    <?= number_format($total_computers) ?>
+        <!-- Stats Cards Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6 no-print">
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Computers</span>
+                    <span class="material-symbols-outlined text-primary text-base">computer</span>
                 </div>
+                <p class="text-2xl font-bold mt-1 text-slate-900 dark:text-white"><?= number_format($total_computers) ?></p>
+                <span class="text-[10px] text-slate-400">Hospital inventory fleet</span>
             </div>
-            <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-                <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Showing</div>
-                <div class="text-2xl font-bold text-emerald-500">
-                    <?= number_format($total_items) ?>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Active Units</span>
+                    <span class="material-symbols-outlined text-emerald-500 text-base">check_circle</span>
                 </div>
+                <p class="text-2xl font-bold mt-1 text-emerald-500"><?= number_format($active_comp_count) ?></p>
+                <span class="text-[10px] text-slate-400">Operational in production</span>
             </div>
-            <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-                <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Locations</div>
-                <div class="text-2xl font-bold text-slate-700 dark:text-slate-200">
-                    <?= number_format(count($departments)) ?>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Maintenance</span>
+                    <span class="material-symbols-outlined text-amber-500 text-base">build</span>
                 </div>
+                <p class="text-2xl font-bold mt-1 text-amber-500"><?= number_format($maint_comp_count) ?></p>
+                <span class="text-[10px] text-slate-400">Under repair / check</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Locations</span>
+                    <span class="material-symbols-outlined text-purple-500 text-base">location_on</span>
+                </div>
+                <p class="text-2xl font-bold mt-1 text-purple-400"><?= number_format(count($departments)) ?></p>
+                <span class="text-[10px] text-slate-400">Covered departments</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">IP Configured</span>
+                    <span class="material-symbols-outlined text-blue-500 text-base">lan</span>
+                </div>
+                <p class="text-2xl font-bold mt-1 text-blue-400"><?= number_format($with_ip_comp_count) ?></p>
+                <span class="text-[10px] text-slate-400">Network mapped</span>
             </div>
         </div>
 
@@ -1354,6 +1527,7 @@ if (!$is_ajax) {
                     </div>
 
                     <!-- Hidden inputs carry all active filter values on submit -->
+                    <input type="hidden" name="status"     id="hid_status"     value="<?= htmlspecialchars($status_filter) ?>">
                     <input type="hidden" name="department" id="hid_department" value="<?= htmlspecialchars($department_filter) ?>">
                     <input type="hidden" name="printer"    id="hid_printer"    value="<?= htmlspecialchars($printer_filter) ?>">
                     <input type="hidden" name="printer_sn" id="hid_printer_sn" value="<?= htmlspecialchars($printer_sn_filter) ?>">
@@ -1366,7 +1540,8 @@ if (!$is_ajax) {
                     // Detect which filter category is currently active
                     $active_cat_key = '';
                     $active_cat_val = '';
-                    if ($department_filter  !== 'All' && $department_filter  !== '') { $active_cat_key = 'department'; $active_cat_val = $department_filter; }
+                    if ($status_filter      !== 'All' && $status_filter      !== '') { $active_cat_key = 'status';     $active_cat_val = $status_filter; }
+                    elseif ($department_filter  !== 'All' && $department_filter  !== '') { $active_cat_key = 'department'; $active_cat_val = $department_filter; }
                     elseif ($printer_filter !== 'All' && $printer_filter     !== '') { $active_cat_key = 'printer';    $active_cat_val = $printer_filter; }
                     elseif ($printer_sn_filter !== 'All' && $printer_sn_filter !== '') { $active_cat_key = 'printer_sn'; $active_cat_val = $printer_sn_filter; }
                     elseif ($memory_filter  !== 'All' && $memory_filter      !== '') { $active_cat_key = 'memory';     $active_cat_val = $memory_filter; }
@@ -1376,6 +1551,7 @@ if (!$is_ajax) {
 
                     // Build options data for JS
                     $filter_options = [
+                        'status'     => ['Working', 'Maintenance', 'Transferred', 'Condemned'],
                         'department' => $departments,
                         'printer'    => $printers,
                         'printer_sn' => $printer_sns,
@@ -1391,6 +1567,7 @@ if (!$is_ajax) {
                         onchange="onCatChange(this.value)"
                         class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
                         <option value="">Filter by...</option>
+                        <option value="status"      <?= $active_cat_key==='status'    ?'selected':'' ?>>Status</option>
                         <option value="department"  <?= $active_cat_key==='department' ?'selected':'' ?>>Location</option>
                         <option value="printer"     <?= $active_cat_key==='printer'   ?'selected':'' ?>>Printer</option>
                         <option value="printer_sn"  <?= $active_cat_key==='printer_sn'?'selected':'' ?>>Printer S/N</option>
@@ -1441,7 +1618,7 @@ if (!$is_ajax) {
                     });
 
                     // Reset the previous category's hidden input to 'All'
-                    ['department','printer','printer_sn','memory','os','ms_office','checked_by'].forEach(function(k) {
+                    ['status','department','printer','printer_sn','memory','os','ms_office','checked_by'].forEach(function(k) {
                         if (k !== cat) {
                             const h = document.getElementById('hid_' + k);
                             if (h) h.value = 'All';
@@ -1544,6 +1721,7 @@ if (!$is_ajax) {
                                     $status_val = $item['status'] ?? 'Working';
                                     $status_class = match($status_val) {
                                         'Working' => 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+                                        'Maintenance' => 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
                                         'Transferred' => 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
                                         'Condemned' => 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
                                         default => 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
@@ -1704,30 +1882,47 @@ if (!$is_ajax) {
 <?php endif; ?>
 
 <!-- Import CSV Modal -->
-<div id="importModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+<div id="importModal" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog">
     <div class="flex items-center justify-center min-h-screen px-4">
-        <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
-        <div
-            class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-2xl">
-            <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-2">Import Computers from CSV</h3>
-            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                Expected columns (35 total):
-                <span class="font-semibold text-slate-700 dark:text-slate-300">
-                    Building, Floor, Department, End User, MR/PAR, Control Number, System Unit, System Unit S/N,
-                    Monitor, Monitor S/N, Mouse, Mouse S/N, Keyboard, Keyboard S/N, Printer, Printer S/N,
-                    Scanner, Scanner S/N, AVR/UPS, AVR/UPS S/N, Processor, Memory, Storage, OS, OS Product Key,
-                    License, Microsoft Office, MS Office Email, IP Address, MAC Address, Endpoint Secure,
-                    <strong>Firewall</strong>, Checked By, Encoded By, Remarks
-                </span>
-            </p>
-            <form method="POST" enctype="multipart/form-data">
+        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
+        <div class="relative bg-white dark:bg-[#1a2130] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200 dark:border-[#232b3d]">
+            <div class="flex items-center justify-between border-b border-slate-200 dark:border-[#232b3d] pb-3 mb-4">
+                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span class="material-symbols-outlined text-amber-600">upload_file</span> Import Computers from CSV
+                </h3>
+                <button type="button" onclick="toggleModal('importModal')" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+
+            <form method="POST" enctype="multipart/form-data" class="space-y-4">
                 <?= getCsrfInput() ?>
-                <input type="file" name="csv_file" accept=".csv" required
-                    class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5 mb-4">
-                <div class="flex justify-end gap-3">
-                    <button type="button" onclick="toggleModal('importModal')"
-                        class="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">Cancel</button>
-                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl">Import</button>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select CSV File</label>
+                    <input type="file" name="csv_file" accept=".csv" required
+                        class="w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500/10 file:text-amber-600 hover:file:bg-amber-500/20 file:cursor-pointer border border-slate-200 dark:border-[#232b3d] rounded-xl p-2 bg-slate-50 dark:bg-[#101622]">
+                </div>
+
+                <div class="p-3 bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl text-xs space-y-1 text-slate-600 dark:text-slate-400">
+                    <p class="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-[16px] text-amber-500">info</span> Supported Formats:
+                    </p>
+                    <p>&bull; Standard Computer Inventory CSV format (35 columns) or legacy format.</p>
+                    <p>&bull; Existing computers matching Control Number will be updated automatically.</p>
+                    <p>&bull; IP &amp; MAC addresses will automatically register in the IP Module as Active.</p>
+                    <div class="pt-2">
+                        <a href="?download_template=csv" class="inline-flex items-center gap-1 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
+                            <span class="material-symbols-outlined text-[14px]">download</span> Download CSV Template
+                        </a>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-[#232b3d]">
+                    <button type="button" onclick="toggleModal('importModal')" class="px-5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-[#232b3d] transition-colors">Cancel</button>
+                    <button type="submit" class="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 flex items-center gap-1.5 shadow-sm transition-colors">
+                        <span class="material-symbols-outlined text-[16px]">upload</span> Upload &amp; Import
+                    </button>
                 </div>
             </form>
         </div>
@@ -1737,253 +1932,203 @@ if (!$is_ajax) {
 <!-- Add Computer Modal -->
 <div id="addComputerModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
     <div class="flex items-center justify-center min-h-screen px-4">
-        <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm" onclick="toggleModal('addComputerModal')">
-        </div>
-        <div
-            class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-6xl w-full p-4 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-6">Add New Computer</h3>
-            <form method="POST">
+        <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm" onclick="toggleModal('addComputerModal')"></div>
+        <div class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-6xl w-full p-4 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div class="flex items-center justify-between mb-6 sticky top-0 bg-white dark:bg-[#1a2130] pb-3 border-b border-slate-200 dark:border-[#232b3d] z-10">
+                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span class="material-symbols-outlined text-primary">computer</span> Add New Computer
+                </h3>
+                <button type="button" onclick="toggleModal('addComputerModal')" class="text-slate-400 hover:text-white"><span class="material-symbols-outlined">close</span></button>
+            </div>
+            <form method="POST" class="space-y-5">
                 <?= getCsrfInput() ?>
                 <input type="hidden" name="action" value="add_computer">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <!-- Location Fields -->
-                    <select name="building"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                        <option value="">Select Building</option>
-                        <option value="ACIS">ACIS</option>
-                        <option value="Bayanihan">Bayanihan</option>
-                        <option value="Bio Safety">Bio Safety</option>
-                        <option value="Capiz">Capiz</option>
-                        <option value="Dietary">Dietary</option>
-                        <option value="Frontline">Frontline</option>
-                        <option value="HOPSS">HOPSS</option>
-                        <option value="Isolation">Isolation</option>
-                        <option value="Lingap Baga">Lingap Baga</option>
-                        <option value="Medicine">Medicine</option>
-                        <option value="OB-Gyne/Pedia">OB-Gyne/Pedia</option>
-                        <option value="OPD">OPD</option>
-                        <option value="Orthopaedics">Orthopaedics</option>
-                        <option value="Surgery">Surgery</option>
-                        <option value="Trauma">Trauma</option>
-                        <option value="Wellness">Wellness</option>
-                    </select>
-                    <select name="floor"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                        <option value="">Select Floor</option>
-                        <option value="GF">GF</option>
-                        <option value="2F">2F</option>
-                        <option value="3F">3F</option>
-                        <option value="4F">4F</option>
-                        <option value="5F">5F</option>
-                        <option value="6F">6F</option>
-                        <option value="7F">7F</option>
-                    </select>
-                    <input type="text" name="department" placeholder="Department/Section"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="end_user" placeholder="End User"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="mr_par" placeholder="MR/PAR"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="control_number" placeholder="Control Number"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
 
-
-                    <!-- System Unit -->
-                    <input type="text" name="system_unit" placeholder="System Unit"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="system_unit_sn" placeholder="System Unit S/N"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-
-                    <!-- Peripherals -->
-                    <input type="text" name="monitor" placeholder="Monitor"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="monitor_sn" placeholder="Monitor S/N"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="mouse" placeholder="Mouse"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="mouse_sn" placeholder="Mouse S/N"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="keyboard" placeholder="Keyboard"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="keyboard_sn" placeholder="Keyboard S/N"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <!-- Printer Multi-Select -->
-                    <div class="w-full">
-                        <div class="multi-select-dropdown" id="add-printer-dropdown">
-                            <div class="multi-select-trigger" onclick="toggleMultiSelect('add-printer-dropdown')">
-                                <span class="multi-select-label">-- Select Printer(s) --</span>
-                                <span class="material-symbols-outlined multi-select-arrow">expand_more</span>
-                            </div>
-                            <div class="multi-select-panel">
-                                <?php foreach ($printer_options as $opt): ?>
-                                <label class="multi-select-option">
-                                    <input type="checkbox" name="printer[]" value="<?= htmlspecialchars($opt) ?>">
-                                    <span><?= htmlspecialchars($opt) ?></span>
-                                </label>
-                                <?php endforeach; ?>
-                            </div>
+                <!-- General Information -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">General Information</p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Building</label>
+                            <select name="building" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">Select Building</option>
+                                <option>ACIS</option><option>Bayanihan</option><option>Bio Safety</option><option>Capiz</option>
+                                <option>Dietary</option><option>Frontline</option><option>HOPSS</option><option>Isolation</option>
+                                <option>Lingap Baga</option><option>Medicine</option><option>OB-Gyne/Pedia</option><option>OPD</option>
+                                <option>Orthopaedics</option><option>Surgery</option><option>Trauma</option><option>Wellness</option>
+                            </select>
                         </div>
-                    </div>
-                    <input type="text" name="printer_sn" placeholder="Printer S/N"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <!-- Scanner Multi-Select -->
-                    <div class="w-full">
-                        <div class="multi-select-dropdown" id="add-scanner-dropdown">
-                            <div class="multi-select-trigger" onclick="toggleMultiSelect('add-scanner-dropdown')">
-                                <span class="multi-select-label">-- Select Scanner(s) --</span>
-                                <span class="material-symbols-outlined multi-select-arrow">expand_more</span>
-                            </div>
-                            <div class="multi-select-panel">
-                                <?php foreach ($scanner_options as $opt): ?>
-                                <label class="multi-select-option">
-                                    <input type="checkbox" name="scanner[]" value="<?= htmlspecialchars($opt) ?>">
-                                    <span><?= htmlspecialchars($opt) ?></span>
-                                </label>
-                                <?php endforeach; ?>
-                            </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Floor</label>
+                            <select name="floor" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">Select Floor</option>
+                                <option>GF</option><option>2F</option><option>3F</option><option>4F</option><option>5F</option><option>6F</option><option>7F</option>
+                            </select>
                         </div>
-                    </div>
-                    <input type="text" name="scanner_sn" placeholder="Scanner S/N"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <!-- AVR/UPS Multi-Select -->
-                    <div class="w-full">
-                        <div class="multi-select-dropdown" id="add-avr-dropdown">
-                            <div class="multi-select-trigger" onclick="toggleMultiSelect('add-avr-dropdown')">
-                                <span class="multi-select-label">-- Select AVR/UPS --</span>
-                                <span class="material-symbols-outlined multi-select-arrow">expand_more</span>
-                            </div>
-                            <div class="multi-select-panel">
-                                <?php foreach ($avr_ups_options as $opt): ?>
-                                <label class="multi-select-option">
-                                    <input type="checkbox" name="avr_ups[]" value="<?= htmlspecialchars($opt) ?>">
-                                    <span><?= htmlspecialchars($opt) ?></span>
-                                </label>
-                                <?php endforeach; ?>
-                            </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Department / Section</label>
+                            <input type="text" name="department" placeholder="e.g. Nursing Station" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
                         </div>
-                    </div>
-                    <input type="text" name="avr_ups_sn" placeholder="AVR/UPS S/N"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-
-                    <!-- Specs -->
-                    <input type="text" name="processor" placeholder="Processor"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="memory" placeholder="Memory (e.g., 8GB DDR4)"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="storage" placeholder="Storage (e.g., 256GB SSD)"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <select name="os"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                        <option value="">-- Select Operating System --</option>
-                        <option value="WINDOWS 11 HOME SINGLE LANGUAGE">WINDOWS 11 HOME SINGLE LANGUAGE</option>
-                        <option value="WINDOWS 11 PROFESSIONAL">WINDOWS 11 PROFESSIONAL</option>
-                        <option value="WINDOWS 10 HOME SINGLE LANGUAGE">WINDOWS 10 HOME SINGLE LANGUAGE</option>
-                        <option value="WINDOWS 10 PROFESSIONAL">WINDOWS 10 PROFESSIONAL</option>
-                        <option value="WINDOWS 10 ENTERPRISE">WINDOWS 10 ENTERPRISE</option>
-                        <option value="WINDOWS 10 EDUCATION">WINDOWS 10 EDUCATION</option>
-                        <option value="WINDOWS 7 ULTIMATE">WINDOWS 7 ULTIMATE</option>
-                        <option value="WINDOWS 7 PROFESSIONAL">WINDOWS 7 PROFESSIONAL</option>
-                    </select>
-                    <input type="text" name="os_product_key" placeholder="OS Product Key"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-
-                    <!-- Software -->
-                    <select name="license"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                        <option value="N">License: No</option>
-                        <option value="Y">License: Yes</option>
-                    </select>
-                    <select name="microsoft_office"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                        <option value="">-- Select Microsoft Office --</option>
-                        <option value="MICROSOFT 365">MICROSOFT 365</option>
-                        <option value="PROFESSIONAL PLUS 2024">PROFESSIONAL PLUS 2024</option>
-                        <option value="LTSC 2024">LTSC 2024</option>
-                        <option value="HOME &amp; STUDENT 2024">HOME &amp; STUDENT 2024</option>
-                        <option value="HOME BUSINESS 2024">HOME BUSINESS 2024</option>
-                        <option value="HOME 2024">HOME 2024</option>
-                        <option value="STANDARD 2024">STANDARD 2024</option>
-                        <option value="PROFESSIONAL PLUS 2021">PROFESSIONAL PLUS 2021</option>
-                        <option value="LTSC 2021">LTSC 2021</option>
-                        <option value="HOME &amp; STUDENT 2021">HOME &amp; STUDENT 2021</option>
-                        <option value="HOME BUSINESS 2021">HOME BUSINESS 2021</option>
-                        <option value="STANDARD 2021">STANDARD 2021</option>
-                        <option value="PROFESSIONAL PLUS 2019">PROFESSIONAL PLUS 2019</option>
-                        <option value="LTSC 2019">LTSC 2019</option>
-                        <option value="HOME &amp; STUDENT 2019">HOME &amp; STUDENT 2019</option>
-                        <option value="HOME BUSINESS 2019">HOME BUSINESS 2019</option>
-                        <option value="STANDARD 2019">STANDARD 2019</option>
-                        <option value="PROFESSIONAL PLUS 2016">PROFESSIONAL PLUS 2016</option>
-                        <option value="LTSC 2016">LTSC 2016</option>
-                        <option value="HOME &amp; STUDENT 2016">HOME &amp; STUDENT 2016</option>
-                        <option value="HOME BUSINESS 2016">HOME BUSINESS 2016</option>
-                        <option value="STANDARD 2016">STANDARD 2016</option>
-                        <option value="PROFESSIONAL PLUS 2013">PROFESSIONAL PLUS 2013</option>
-                        <option value="MONDO 2016">MONDO 2016</option>
-                        <option value="WPS">WPS</option>
-                    </select>
-                    <input type="email" name="ms_office_email" placeholder="MS Office Email"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-
-                    <!-- Network -->
-                    <input type="text" name="ip_address" placeholder="IP Address"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="mac_address" placeholder="MAC Address"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-
-                    <!-- Security -->
-                    <select name="endpoint_secure"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                        <option value="N">Endpoint Secure: No</option>
-                        <option value="Y">Endpoint Secure: Yes</option>
-                    </select>
-                    <select name="firewall"
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                        <option value="N">Firewall: No</option>
-                        <option value="Y">Firewall: Yes</option>
-                    </select>
-
-                    <!-- Tracking -->
-                    <div>
-                        <label class="block text-xs font-medium text-slate-400 mb-1">Checked By</label>
-                        <select name="checked_by" required
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="">-- Select Checked By --</option>
-                            <?php foreach ($staff_users as $u): ?>
-                                <option value="<?= htmlspecialchars($u) ?>"><?= htmlspecialchars($u) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-400 mb-1">Encoded By</label>
-                        <select name="encoded_by" required
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="">-- Select Encoded By --</option>
-                            <?php foreach ($staff_users as $u): ?>
-                                <option value="<?= htmlspecialchars($u) ?>"><?= htmlspecialchars($u) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <!-- Date (Remarks Date) -->
-                    <div>
-                        <label class="block text-xs font-medium text-slate-400 mb-1">Date</label>
-                        <input type="date" name="remarks_date"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-
-                    <!-- Remarks -->
-                    <div class="col-span-2">
-                        <label class="block text-xs font-medium text-slate-400 mb-1">Remarks</label>
-                        <textarea name="remarks" placeholder="Remarks" rows="2"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5 resize-none"></textarea>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">End User</label>
+                            <input type="text" name="end_user" placeholder="Full name" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">MR / PAR #</label>
+                            <input type="text" name="mr_par" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Control Number</label>
+                            <input type="text" name="control_number" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
+                            <select name="status" id="add_status" onchange="handleAddStatusChange(this.value)" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="Working">Working</option><option value="Maintenance">Maintenance</option><option value="Transferred">Transferred</option><option value="Condemned">Condemned</option>
+                            </select>
+                            <input type="hidden" name="transferred_to" id="add_transferred_to" value="">
+                            <span id="add_transferred_to_display" class="hidden text-xs text-amber-500 font-bold mt-1 block"></span>
+                        </div>
                     </div>
                 </div>
-                <div class="mt-6 flex justify-end gap-3">
-                    <button type="button" onclick="toggleModal('addComputerModal')"
-                        class="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">Cancel</button>
-                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl">Save
-                        Computer</button>
+
+                <!-- System Unit -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">System Unit</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">System Unit</label><input type="text" name="system_unit" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">System Unit S/N</label><input type="text" name="system_unit_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                    </div>
+                </div>
+
+                <!-- Core Hardware Specs -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Core Hardware Specifications</p>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div class="bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl p-3">
+                            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-2">Processor</label>
+                            <input type="text" name="processor" placeholder="e.g. Intel i5-12400" class="w-full bg-transparent border-b border-slate-300 dark:border-[#232b3d] text-sm font-bold text-slate-800 dark:text-white focus:ring-0 focus:border-primary pb-1 outline-none">
+                        </div>
+                        <div class="bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl p-3">
+                            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-2">Memory (RAM)</label>
+                            <input type="text" name="memory" placeholder="e.g. 8GB DDR4" class="w-full bg-transparent border-b border-slate-300 dark:border-[#232b3d] text-sm font-bold text-slate-800 dark:text-white focus:ring-0 focus:border-primary pb-1 outline-none">
+                        </div>
+                        <div class="bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl p-3">
+                            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-2">Storage</label>
+                            <input type="text" name="storage" placeholder="e.g. 256GB SSD" class="w-full bg-transparent border-b border-slate-300 dark:border-[#232b3d] text-sm font-bold text-slate-800 dark:text-white focus:ring-0 focus:border-primary pb-1 outline-none">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Peripherals -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Peripheral Components</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Monitor</label><input type="text" name="monitor" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Monitor S/N</label><input type="text" name="monitor_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Mouse</label><input type="text" name="mouse" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Mouse S/N</label><input type="text" name="mouse_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Keyboard</label><input type="text" name="keyboard" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Keyboard S/N</label><input type="text" name="keyboard_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Printer</label>
+                            <div class="multi-select-dropdown" id="add-printer-dropdown">
+                                <div class="multi-select-trigger" onclick="toggleMultiSelect('add-printer-dropdown')"><span class="multi-select-label">-- Select Printer(s) --</span><span class="material-symbols-outlined multi-select-arrow">expand_more</span></div>
+                                <div class="multi-select-panel"><?php foreach ($printer_options as $opt): ?><label class="multi-select-option"><input type="checkbox" name="printer[]" value="<?= htmlspecialchars($opt) ?>"><span><?= htmlspecialchars($opt) ?></span></label><?php endforeach; ?></div>
+                            </div>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Printer S/N</label><input type="text" name="printer_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Scanner</label>
+                            <div class="multi-select-dropdown" id="add-scanner-dropdown">
+                                <div class="multi-select-trigger" onclick="toggleMultiSelect('add-scanner-dropdown')"><span class="multi-select-label">-- Select Scanner(s) --</span><span class="material-symbols-outlined multi-select-arrow">expand_more</span></div>
+                                <div class="multi-select-panel"><?php foreach ($scanner_options as $opt): ?><label class="multi-select-option"><input type="checkbox" name="scanner[]" value="<?= htmlspecialchars($opt) ?>"><span><?= htmlspecialchars($opt) ?></span></label><?php endforeach; ?></div>
+                            </div>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Scanner S/N</label><input type="text" name="scanner_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">AVR / UPS</label>
+                            <div class="multi-select-dropdown" id="add-avr-dropdown">
+                                <div class="multi-select-trigger" onclick="toggleMultiSelect('add-avr-dropdown')"><span class="multi-select-label">-- Select AVR/UPS --</span><span class="material-symbols-outlined multi-select-arrow">expand_more</span></div>
+                                <div class="multi-select-panel"><?php foreach ($avr_ups_options as $opt): ?><label class="multi-select-option"><input type="checkbox" name="avr_ups[]" value="<?= htmlspecialchars($opt) ?>"><span><?= htmlspecialchars($opt) ?></span></label><?php endforeach; ?></div>
+                            </div>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">AVR/UPS S/N</label><input type="text" name="avr_ups_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                    </div>
+                </div>
+
+                <!-- System & Software -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">System &amp; Software</p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Operating System</label>
+                            <select name="os" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">-- Select OS --</option>
+                                <option>WINDOWS 11 HOME SINGLE LANGUAGE</option><option>WINDOWS 11 PROFESSIONAL</option>
+                                <option>WINDOWS 10 HOME SINGLE LANGUAGE</option><option>WINDOWS 10 PROFESSIONAL</option>
+                                <option>WINDOWS 10 ENTERPRISE</option><option>WINDOWS 10 EDUCATION</option>
+                                <option>WINDOWS 7 ULTIMATE</option><option>WINDOWS 7 PROFESSIONAL</option>
+                            </select>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">OS Product Key</label><input type="text" name="os_product_key" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">OS License</label>
+                            <select name="license" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Microsoft Office</label>
+                            <select name="microsoft_office" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">-- Select Microsoft Office --</option>
+                                <option>MICROSOFT 365</option><option>PROFESSIONAL PLUS 2024</option><option>LTSC 2024</option>
+                                <option>HOME &amp; STUDENT 2024</option><option>HOME BUSINESS 2024</option><option>HOME 2024</option><option>STANDARD 2024</option>
+                                <option>PROFESSIONAL PLUS 2021</option><option>LTSC 2021</option><option>HOME &amp; STUDENT 2021</option>
+                                <option>HOME BUSINESS 2021</option><option>STANDARD 2021</option><option>PROFESSIONAL PLUS 2019</option>
+                                <option>LTSC 2019</option><option>HOME &amp; STUDENT 2019</option><option>HOME BUSINESS 2019</option>
+                                <option>STANDARD 2019</option><option>PROFESSIONAL PLUS 2016</option><option>LTSC 2016</option>
+                                <option>HOME &amp; STUDENT 2016</option><option>HOME BUSINESS 2016</option><option>STANDARD 2016</option>
+                                <option>PROFESSIONAL PLUS 2013</option><option>MONDO 2016</option><option>WPS</option>
+                            </select>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MS Office Email</label><input type="email" name="ms_office_email" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                    </div>
+                </div>
+
+                <!-- Network & Security -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Network &amp; Security</p>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">IP Address</label><input type="text" name="ip_address" placeholder="192.163.x.x" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MAC Address</label><input type="text" name="mac_address" placeholder="00:1A:2B:..." class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure</label><select name="endpoint_secure" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall</label><select name="firewall" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
+                    </div>
+                </div>
+
+                <!-- Personnel & Remarks -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Personnel &amp; Remarks</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Checked By <span class="text-red-500">*</span></label>
+                            <select name="checked_by" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">-- Select --</option><?php foreach ($staff_users as $u): ?><option value="<?= htmlspecialchars($u) ?>"><?= htmlspecialchars($u) ?></option><?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Encoded By <span class="text-red-500">*</span></label>
+                            <select name="encoded_by" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">-- Select --</option><?php foreach ($staff_users as $u): ?><option value="<?= htmlspecialchars($u) ?>"><?= htmlspecialchars($u) ?></option><?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Date</label><input type="date" name="remarks_date" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Remarks</label><textarea name="remarks" rows="2" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary resize-none"></textarea></div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-[#232b3d]">
+                    <button type="button" onclick="toggleModal('addComputerModal')" class="px-5 py-2 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-[#232b3d]">Cancel</button>
+                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl hover:bg-primary/90">Save Computer</button>
                 </div>
             </form>
         </div>
@@ -1993,287 +2138,192 @@ if (!$is_ajax) {
 <!-- Edit Computer Modal -->
 <div id="editComputerModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
     <div class="flex items-center justify-center min-h-screen px-4">
-        <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm" onclick="toggleModal('editComputerModal')">
-        </div>
-        <div
-            class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-6xl w-full p-4 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-6">Edit Computer</h3>
-            <form method="POST">
+        <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm" onclick="toggleModal('editComputerModal')"></div>
+        <div class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-6xl w-full p-4 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div class="flex items-center justify-between mb-6 sticky top-0 bg-white dark:bg-[#1a2130] pb-3 border-b border-slate-200 dark:border-[#232b3d] z-10">
+                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span class="material-symbols-outlined text-primary">edit</span> Edit Computer
+                </h3>
+                <button type="button" onclick="toggleModal('editComputerModal')" class="text-slate-400 hover:text-white"><span class="material-symbols-outlined">close</span></button>
+            </div>
+            <form method="POST" class="space-y-5">
                 <?= getCsrfInput() ?>
                 <input type="hidden" name="action" value="edit_computer">
                 <input type="hidden" name="id" id="edit_id">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Building</label>
-                        <select name="building" id="edit_building"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="">Select Building</option>
-                            <option value="ACIS">ACIS</option>
-                            <option value="Bayanihan">Bayanihan</option>
-                            <option value="Bio Safety">Bio Safety</option>
-                            <option value="Capiz">Capiz</option>
-                            <option value="Dietary">Dietary</option>
-                            <option value="Frontline">Frontline</option>
-                            <option value="HOPSS">HOPSS</option>
-                            <option value="Isolation">Isolation</option>
-                            <option value="Lingap Baga">Lingap Baga</option>
-                            <option value="Medicine">Medicine</option>
-                            <option value="OB-Gyne/Pedia">OB-Gyne/Pedia</option>
-                            <option value="OPD">OPD</option>
-                            <option value="Orthopaedics">Orthopaedics</option>
-                            <option value="Surgery">Surgery</option>
-                            <option value="Trauma">Trauma</option>
-                            <option value="Wellness">Wellness</option>
-                        </select>
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Floor</label>
-                        <select name="floor" id="edit_floor"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="">Select Floor</option>
-                            <option value="GF">GF</option>
-                            <option value="2F">2F</option>
-                            <option value="3F">3F</option>
-                            <option value="4F">4F</option>
-                            <option value="5F">5F</option>
-                            <option value="6F">6F</option>
-                            <option value="7F">7F</option>
-                        </select>
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Department/Section</label><input
-                            type="text" name="department" id="edit_department"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
 
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">End User</label><input type="text"
-                            name="end_user" id="edit_end_user"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">MR/PAR</label><input type="text"
-                            name="mr_par" id="edit_mr_par"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Control Number</label><input
-                            type="text" name="control_number" id="edit_control_number"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">System Unit</label><input
-                            type="text" name="system_unit" id="edit_system_unit"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">System Unit S/N</label><input
-                            type="text" name="system_unit_sn" id="edit_system_unit_sn"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Monitor</label><input type="text"
-                            name="monitor" id="edit_monitor"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Monitor S/N</label><input
-                            type="text" name="monitor_sn" id="edit_monitor_sn"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Mouse</label><input type="text"
-                            name="mouse" id="edit_mouse"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Mouse S/N</label><input
-                            type="text" name="mouse_sn" id="edit_mouse_sn"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Keyboard</label><input type="text"
-                            name="keyboard" id="edit_keyboard"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Keyboard S/N</label><input
-                            type="text" name="keyboard_sn" id="edit_keyboard_sn"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Printer</label>
-                        <div class="multi-select-dropdown" id="edit-printer-dropdown">
-                            <div class="multi-select-trigger" onclick="toggleMultiSelect('edit-printer-dropdown')">
-                                <span class="multi-select-label" id="edit-printer-label">-- Select Printer(s) --</span>
-                                <span class="material-symbols-outlined multi-select-arrow">expand_more</span>
-                            </div>
-                            <div class="multi-select-panel">
-                                <?php foreach ($printer_options as $opt): ?>
-                                <label class="multi-select-option">
-                                    <input type="checkbox" name="printer[]" value="<?= htmlspecialchars($opt) ?>" class="edit-printer-cb">
-                                    <span><?= htmlspecialchars($opt) ?></span>
-                                </label>
-                                <?php endforeach; ?>
-                            </div>
+                <!-- General Information -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">General Information</p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Building</label>
+                            <select name="building" id="edit_building" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">Select Building</option>
+                                <option>ACIS</option><option>Bayanihan</option><option>Bio Safety</option><option>Capiz</option>
+                                <option>Dietary</option><option>Frontline</option><option>HOPSS</option><option>Isolation</option>
+                                <option>Lingap Baga</option><option>Medicine</option><option>OB-Gyne/Pedia</option><option>OPD</option>
+                                <option>Orthopaedics</option><option>Surgery</option><option>Trauma</option><option>Wellness</option>
+                            </select>
                         </div>
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Printer S/N</label><input
-                            type="text" name="printer_sn" id="edit_printer_sn"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Scanner</label>
-                        <div class="multi-select-dropdown" id="edit-scanner-dropdown">
-                            <div class="multi-select-trigger" onclick="toggleMultiSelect('edit-scanner-dropdown')">
-                                <span class="multi-select-label" id="edit-scanner-label">-- Select Scanner(s) --</span>
-                                <span class="material-symbols-outlined multi-select-arrow">expand_more</span>
-                            </div>
-                            <div class="multi-select-panel">
-                                <?php foreach ($scanner_options as $opt): ?>
-                                <label class="multi-select-option">
-                                    <input type="checkbox" name="scanner[]" value="<?= htmlspecialchars($opt) ?>" class="edit-scanner-cb">
-                                    <span><?= htmlspecialchars($opt) ?></span>
-                                </label>
-                                <?php endforeach; ?>
-                            </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Floor</label>
+                            <select name="floor" id="edit_floor" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">Select Floor</option>
+                                <option>GF</option><option>2F</option><option>3F</option><option>4F</option><option>5F</option><option>6F</option><option>7F</option>
+                            </select>
                         </div>
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Scanner S/N</label><input
-                            type="text" name="scanner_sn" id="edit_scanner_sn"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">AVR/UPS</label>
-                        <div class="multi-select-dropdown" id="edit-avr-dropdown">
-                            <div class="multi-select-trigger" onclick="toggleMultiSelect('edit-avr-dropdown')">
-                                <span class="multi-select-label" id="edit-avr-label">-- Select AVR/UPS --</span>
-                                <span class="material-symbols-outlined multi-select-arrow">expand_more</span>
-                            </div>
-                            <div class="multi-select-panel">
-                                <?php foreach ($avr_ups_options as $opt): ?>
-                                <label class="multi-select-option">
-                                    <input type="checkbox" name="avr_ups[]" value="<?= htmlspecialchars($opt) ?>" class="edit-avr-cb">
-                                    <span><?= htmlspecialchars($opt) ?></span>
-                                </label>
-                                <?php endforeach; ?>
-                            </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Department / Section</label><input type="text" name="department" id="edit_department" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">End User</label><input type="text" name="end_user" id="edit_end_user" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MR / PAR #</label><input type="text" name="mr_par" id="edit_mr_par" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Control Number</label><input type="text" name="control_number" id="edit_control_number" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
+                            <select name="status" id="edit_status" onchange="handleEditStatusChange(this.value)" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="Working">Working</option><option value="Maintenance">Maintenance</option><option value="Transferred">Transferred</option><option value="Condemned">Condemned</option>
+                            </select>
+                            <input type="hidden" name="transferred_to" id="edit_transferred_to" value="">
+                            <span id="edit_transferred_to_display" class="hidden text-xs text-amber-500 font-bold mt-1 block"></span>
                         </div>
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">AVR/UPS S/N</label><input
-                            type="text" name="avr_ups_sn" id="edit_avr_ups_sn"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Processor</label><input
-                            type="text" name="processor" id="edit_processor"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Memory</label><input type="text"
-                            name="memory" id="edit_memory"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Storage</label><input type="text"
-                            name="storage" id="edit_storage"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">OS</label>
-                        <select name="os" id="edit_os"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="">-- Select Operating System --</option>
-                            <option value="WINDOWS 11 HOME SINGLE LANGUAGE">WINDOWS 11 HOME SINGLE LANGUAGE</option>
-                            <option value="WINDOWS 11 PROFESSIONAL">WINDOWS 11 PROFESSIONAL</option>
-                            <option value="WINDOWS 10 HOME SINGLE LANGUAGE">WINDOWS 10 HOME SINGLE LANGUAGE</option>
-                            <option value="WINDOWS 10 PROFESSIONAL">WINDOWS 10 PROFESSIONAL</option>
-                            <option value="WINDOWS 10 ENTERPRISE">WINDOWS 10 ENTERPRISE</option>
-                            <option value="WINDOWS 10 EDUCATION">WINDOWS 10 EDUCATION</option>
-                            <option value="WINDOWS 7 ULTIMATE">WINDOWS 7 ULTIMATE</option>
-                            <option value="WINDOWS 7 PROFESSIONAL">WINDOWS 7 PROFESSIONAL</option>
-                        </select>
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">OS Product Key</label><input
-                            type="text" name="os_product_key" id="edit_os_product_key"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">License</label><select
-                            name="license" id="edit_license"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="N">No</option>
-                            <option value="Y">Yes</option>
-                        </select></div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Microsoft Office</label>
-                        <select name="microsoft_office" id="edit_microsoft_office"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="">-- Select Microsoft Office --</option>
-                            <option value="MICROSOFT 365">MICROSOFT 365</option>
-                            <option value="PROFESSIONAL PLUS 2024">PROFESSIONAL PLUS 2024</option>
-                            <option value="LTSC 2024">LTSC 2024</option>
-                            <option value="HOME &amp; STUDENT 2024">HOME &amp; STUDENT 2024</option>
-                            <option value="HOME BUSINESS 2024">HOME BUSINESS 2024</option>
-                            <option value="HOME 2024">HOME 2024</option>
-                            <option value="STANDARD 2024">STANDARD 2024</option>
-                            <option value="PROFESSIONAL PLUS 2021">PROFESSIONAL PLUS 2021</option>
-                            <option value="LTSC 2021">LTSC 2021</option>
-                            <option value="HOME &amp; STUDENT 2021">HOME &amp; STUDENT 2021</option>
-                            <option value="HOME BUSINESS 2021">HOME BUSINESS 2021</option>
-                            <option value="STANDARD 2021">STANDARD 2021</option>
-                            <option value="PROFESSIONAL PLUS 2019">PROFESSIONAL PLUS 2019</option>
-                            <option value="LTSC 2019">LTSC 2019</option>
-                            <option value="HOME &amp; STUDENT 2019">HOME &amp; STUDENT 2019</option>
-                            <option value="HOME BUSINESS 2019">HOME BUSINESS 2019</option>
-                            <option value="STANDARD 2019">STANDARD 2019</option>
-                            <option value="PROFESSIONAL PLUS 2016">PROFESSIONAL PLUS 2016</option>
-                            <option value="LTSC 2016">LTSC 2016</option>
-                            <option value="HOME &amp; STUDENT 2016">HOME &amp; STUDENT 2016</option>
-                            <option value="HOME BUSINESS 2016">HOME BUSINESS 2016</option>
-                            <option value="STANDARD 2016">STANDARD 2016</option>
-                            <option value="PROFESSIONAL PLUS 2013">PROFESSIONAL PLUS 2013</option>
-                            <option value="MONDO 2016">MONDO 2016</option>
-                            <option value="WPS">WPS</option>
-                        </select>
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">MS Office Email</label><input
-                            type="email" name="ms_office_email" id="edit_ms_office_email"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">IP Address</label><input
-                            type="text" name="ip_address" id="edit_ip_address"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">MAC Address</label><input
-                            type="text" name="mac_address" id="edit_mac_address"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Endpoint Secure</label><select
-                            name="endpoint_secure" id="edit_endpoint_secure"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="N">No</option>
-                            <option value="Y">Yes</option>
-                        </select></div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Firewall</label><select
-                            name="firewall" id="edit_firewall"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="N">No</option>
-                            <option value="Y">Yes</option>
-                        </select></div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Checked By</label>
-                        <select name="checked_by" id="edit_checked_by" required
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="">-- Select Checked By --</option>
-                            <?php foreach ($staff_users as $u): ?>
-                                <option value="<?= htmlspecialchars($u) ?>"><?= htmlspecialchars($u) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Encoded By</label>
-                        <select name="encoded_by" id="edit_encoded_by" required
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                            <option value="">-- Select Encoded By --</option>
-                            <?php foreach ($staff_users as $u): ?>
-                                <option value="<?= htmlspecialchars($u) ?>"><?= htmlspecialchars($u) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <!-- Date (Remarks Date) -->
-                    <div><label class="block text-xs font-medium text-slate-400 mb-1">Date</label>
-                        <input type="date" name="remarks_date" id="edit_remarks_date"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    </div>
-
-                    <!-- Remarks -->
-                    <div class="col-span-2"><label class="block text-xs font-medium text-slate-400 mb-1">Remarks</label>
-                        <textarea name="remarks" id="edit_remarks" rows="2"
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5 resize-none"></textarea>
                     </div>
                 </div>
-                <div class="mt-6 flex justify-end gap-3">
-                    <button type="button" onclick="toggleModal('editComputerModal')"
-                        class="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">Cancel</button>
-                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl">Update
-                        Computer</button>
+
+                <!-- System Unit -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">System Unit</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">System Unit</label><input type="text" name="system_unit" id="edit_system_unit" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">System Unit S/N</label><input type="text" name="system_unit_sn" id="edit_system_unit_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                    </div>
+                </div>
+
+                <!-- Core Hardware Specs -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Core Hardware Specifications</p>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div class="bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl p-3">
+                            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-2">Processor</label>
+                            <input type="text" name="processor" id="edit_processor" class="w-full bg-transparent border-b border-slate-300 dark:border-[#232b3d] text-sm font-bold text-slate-800 dark:text-white focus:ring-0 focus:border-primary pb-1 outline-none">
+                        </div>
+                        <div class="bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl p-3">
+                            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-2">Memory (RAM)</label>
+                            <input type="text" name="memory" id="edit_memory" class="w-full bg-transparent border-b border-slate-300 dark:border-[#232b3d] text-sm font-bold text-slate-800 dark:text-white focus:ring-0 focus:border-primary pb-1 outline-none">
+                        </div>
+                        <div class="bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl p-3">
+                            <label class="block text-[10px] font-bold text-slate-400 uppercase mb-2">Storage</label>
+                            <input type="text" name="storage" id="edit_storage" class="w-full bg-transparent border-b border-slate-300 dark:border-[#232b3d] text-sm font-bold text-slate-800 dark:text-white focus:ring-0 focus:border-primary pb-1 outline-none">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Peripherals -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Peripheral Components</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Monitor</label><input type="text" name="monitor" id="edit_monitor" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Monitor S/N</label><input type="text" name="monitor_sn" id="edit_monitor_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Mouse</label><input type="text" name="mouse" id="edit_mouse" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Mouse S/N</label><input type="text" name="mouse_sn" id="edit_mouse_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Keyboard</label><input type="text" name="keyboard" id="edit_keyboard" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Keyboard S/N</label><input type="text" name="keyboard_sn" id="edit_keyboard_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Printer</label>
+                            <div class="multi-select-dropdown" id="edit-printer-dropdown">
+                                <div class="multi-select-trigger" onclick="toggleMultiSelect('edit-printer-dropdown')"><span class="multi-select-label">-- Select Printer(s) --</span><span class="material-symbols-outlined multi-select-arrow">expand_more</span></div>
+                                <div class="multi-select-panel"><?php foreach ($printer_options as $opt): ?><label class="multi-select-option"><input type="checkbox" name="printer[]" value="<?= htmlspecialchars($opt) ?>"><span><?= htmlspecialchars($opt) ?></span></label><?php endforeach; ?></div>
+                            </div>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Printer S/N</label><input type="text" name="printer_sn" id="edit_printer_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Scanner</label>
+                            <div class="multi-select-dropdown" id="edit-scanner-dropdown">
+                                <div class="multi-select-trigger" onclick="toggleMultiSelect('edit-scanner-dropdown')"><span class="multi-select-label">-- Select Scanner(s) --</span><span class="material-symbols-outlined multi-select-arrow">expand_more</span></div>
+                                <div class="multi-select-panel"><?php foreach ($scanner_options as $opt): ?><label class="multi-select-option"><input type="checkbox" name="scanner[]" value="<?= htmlspecialchars($opt) ?>"><span><?= htmlspecialchars($opt) ?></span></label><?php endforeach; ?></div>
+                            </div>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Scanner S/N</label><input type="text" name="scanner_sn" id="edit_scanner_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">AVR / UPS</label>
+                            <div class="multi-select-dropdown" id="edit-avr-dropdown">
+                                <div class="multi-select-trigger" onclick="toggleMultiSelect('edit-avr-dropdown')"><span class="multi-select-label">-- Select AVR/UPS --</span><span class="material-symbols-outlined multi-select-arrow">expand_more</span></div>
+                                <div class="multi-select-panel"><?php foreach ($avr_ups_options as $opt): ?><label class="multi-select-option"><input type="checkbox" name="avr_ups[]" value="<?= htmlspecialchars($opt) ?>"><span><?= htmlspecialchars($opt) ?></span></label><?php endforeach; ?></div>
+                            </div>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">AVR/UPS S/N</label><input type="text" name="avr_ups_sn" id="edit_avr_ups_sn" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                    </div>
+                </div>
+
+                <!-- System & Software -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">System &amp; Software</p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Operating System</label>
+                            <select name="os" id="edit_os" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">-- Select OS --</option>
+                                <option>WINDOWS 11 HOME SINGLE LANGUAGE</option><option>WINDOWS 11 PROFESSIONAL</option>
+                                <option>WINDOWS 10 HOME SINGLE LANGUAGE</option><option>WINDOWS 10 PROFESSIONAL</option>
+                                <option>WINDOWS 10 ENTERPRISE</option><option>WINDOWS 10 EDUCATION</option>
+                                <option>WINDOWS 7 ULTIMATE</option><option>WINDOWS 7 PROFESSIONAL</option>
+                            </select>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">OS Product Key</label><input type="text" name="os_product_key" id="edit_os_product_key" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">OS License</label>
+                            <select name="license" id="edit_license" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Microsoft Office</label>
+                            <select name="microsoft_office" id="edit_microsoft_office" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">-- Select Microsoft Office --</option>
+                                <option>MICROSOFT 365</option><option>PROFESSIONAL PLUS 2024</option><option>LTSC 2024</option>
+                                <option>HOME &amp; STUDENT 2024</option><option>HOME BUSINESS 2024</option><option>HOME 2024</option><option>STANDARD 2024</option>
+                                <option>PROFESSIONAL PLUS 2021</option><option>LTSC 2021</option><option>HOME &amp; STUDENT 2021</option>
+                                <option>HOME BUSINESS 2021</option><option>STANDARD 2021</option><option>PROFESSIONAL PLUS 2019</option>
+                                <option>LTSC 2019</option><option>HOME &amp; STUDENT 2019</option><option>HOME BUSINESS 2019</option>
+                                <option>STANDARD 2019</option><option>PROFESSIONAL PLUS 2016</option><option>LTSC 2016</option>
+                                <option>HOME &amp; STUDENT 2016</option><option>HOME BUSINESS 2016</option><option>STANDARD 2016</option>
+                                <option>PROFESSIONAL PLUS 2013</option><option>MONDO 2016</option><option>WPS</option>
+                            </select>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MS Office Email</label><input type="email" name="ms_office_email" id="edit_ms_office_email" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                    </div>
+                </div>
+
+                <!-- Network & Security -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Network &amp; Security</p>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">IP Address</label><input type="text" name="ip_address" id="edit_ip_address" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MAC Address</label><input type="text" name="mac_address" id="edit_mac_address" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure</label><select name="endpoint_secure" id="edit_endpoint_secure" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall</label><select name="firewall" id="edit_firewall" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
+                    </div>
+                </div>
+
+                <!-- Personnel & Remarks -->
+                <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Personnel &amp; Remarks</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Checked By <span class="text-red-500">*</span></label>
+                            <select name="checked_by" id="edit_checked_by" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">-- Select --</option><?php foreach ($staff_users as $u): ?><option value="<?= htmlspecialchars($u) ?>"><?= htmlspecialchars($u) ?></option><?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Encoded By <span class="text-red-500">*</span></label>
+                            <select name="encoded_by" id="edit_encoded_by" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">-- Select --</option><?php foreach ($staff_users as $u): ?><option value="<?= htmlspecialchars($u) ?>"><?= htmlspecialchars($u) ?></option><?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Date</label><input type="date" name="remarks_date" id="edit_remarks_date" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Remarks</label><textarea name="remarks" id="edit_remarks" rows="2" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary resize-none"></textarea></div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-[#232b3d]">
+                    <button type="button" onclick="toggleModal('editComputerModal')" class="px-5 py-2 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-[#232b3d]">Cancel</button>
+                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl hover:bg-primary/90">Update Computer</button>
                 </div>
             </form>
         </div>
@@ -2339,7 +2389,73 @@ if (!$is_ajax) {
         document.getElementById('edit_encoded_by').value = item.encoded_by || '';
         document.getElementById('edit_remarks').value = item.remarks || '';
         document.getElementById('edit_remarks_date').value = item.remarks_date ? item.remarks_date.substring(0, 10) : '';
+        // Status & transferred_to
+        document.getElementById('edit_status').value = item.status || 'Working';
+        document.getElementById('edit_transferred_to').value = item.transferred_to || '';
+        const dispEl = document.getElementById('edit_transferred_to_display');
+        if (item.status === 'Transferred' && item.transferred_to) {
+            dispEl.textContent = '→ Transferred to: ' + item.transferred_to;
+            dispEl.classList.remove('hidden');
+        } else {
+            dispEl.textContent = '';
+            dispEl.classList.add('hidden');
+        }
         toggleModal('editComputerModal');
+    }
+
+    // ── Transfer Destination Dialog ──────────────────────────────────────────
+    function showTransferDialog(mode) {
+        // mode = 'add' or 'edit'
+        document.getElementById('transferDialogMode').value = mode;
+        toggleModal('transferDialog');
+    }
+
+    function confirmTransfer() {
+        const dest = document.getElementById('transfer_dest_select').value;
+        if (!dest) { alert('Please select a destination facility.'); return; }
+        const mode = document.getElementById('transferDialogMode').value;
+        if (mode === 'add') {
+            document.getElementById('add_transferred_to').value = dest;
+            document.getElementById('add_status').value = 'Transferred';
+            const dispEl = document.getElementById('add_transferred_to_display');
+            if (dispEl) {
+                dispEl.textContent = '→ Transferred to: ' + dest;
+                dispEl.classList.remove('hidden');
+            }
+        } else {
+            document.getElementById('edit_transferred_to').value = dest;
+            document.getElementById('edit_status').value = 'Transferred';
+            const dispEl = document.getElementById('edit_transferred_to_display');
+            if (dispEl) {
+                dispEl.textContent = '→ Transferred to: ' + dest;
+                dispEl.classList.remove('hidden');
+            }
+        }
+        toggleModal('transferDialog');
+    }
+
+    function handleAddStatusChange(val) {
+        if (val === 'Transferred') {
+            showTransferDialog('add');
+        } else {
+            document.getElementById('add_transferred_to').value = '';
+            const dispEl = document.getElementById('add_transferred_to_display');
+            if (dispEl) {
+                dispEl.textContent = '';
+                dispEl.classList.add('hidden');
+            }
+        }
+    }
+
+    function handleEditStatusChange(val) {
+        if (val === 'Transferred') {
+            showTransferDialog('edit');
+        } else {
+            document.getElementById('edit_transferred_to').value = '';
+            const dispEl = document.getElementById('edit_transferred_to_display');
+            dispEl.textContent = '';
+            dispEl.classList.add('hidden');
+        }
     }
 
     // Live AJAX Search
@@ -2459,6 +2575,11 @@ if (!$is_ajax) {
             window.print();
         }, 500);
     }
+
+    window.addEventListener('afterprint', () => {
+        document.body.classList.remove('print-filtered');
+        document.querySelectorAll('tbody tr').forEach(tr => tr.classList.remove('print-row-selected'));
+    });
 
     function exportSelected() {
         const checkboxes = document.querySelectorAll('.item-checkbox:checked');
@@ -2781,5 +2902,55 @@ if (!$is_ajax) {
         background-color: #1a2130;
     }
 </style>
+
+<!-- Transfer Destination Dialog -->
+<div id="transferDialog" class="hidden fixed inset-0 z-[60] overflow-y-auto">
+    <div class="flex items-center justify-center min-h-screen px-4">
+        <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm"></div>
+        <div class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-blue-500/10 rounded-lg text-blue-500">
+                    <span class="material-symbols-outlined">swap_horiz</span>
+                </div>
+                <h3 class="text-lg font-bold text-slate-900 dark:text-white">Transfer Computer</h3>
+            </div>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">Select the destination facility for this transfer:</p>
+            <input type="hidden" id="transferDialogMode" value="edit">
+            <select id="transfer_dest_select"
+                class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5 mb-6">
+                <option value="">-- Select Destination --</option>
+                <option value="JASMC-ST">JASMC-ST (Sto. Tomas)</option>
+                <option value="JASMC-VT">JASMC-VT (Victoria Tarlac)</option>
+                <option value="DOH-JBL-CMC">DOH-JBL-CMC (Children's Medical Center)</option>
+            </select>
+            <div class="flex justify-end gap-3">
+                <button type="button" onclick="cancelTransferDialog()"
+                    class="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-medium">Cancel</button>
+                <button type="button" onclick="confirmTransfer()"
+                    class="px-6 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors">
+                    <span class="material-symbols-outlined text-[16px] align-middle mr-1">check</span>Confirm Transfer
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function cancelTransferDialog() {
+    const mode = document.getElementById('transferDialogMode').value;
+    // Revert status back to Working if user cancels
+    if (mode === 'add') {
+        document.getElementById('add_status').value = 'Working';
+        document.getElementById('add_transferred_to').value = '';
+        const dispEl = document.getElementById('add_transferred_to_display');
+        if (dispEl) { dispEl.textContent = ''; dispEl.classList.add('hidden'); }
+    } else {
+        document.getElementById('edit_status').value = 'Working';
+        document.getElementById('edit_transferred_to').value = '';
+        const dispEl = document.getElementById('edit_transferred_to_display');
+        if (dispEl) { dispEl.textContent = ''; dispEl.classList.add('hidden'); }
+    }
+    toggleModal('transferDialog');
+}
+</script>
 
 <?php require_once '../../includes/footer.php'; ?>

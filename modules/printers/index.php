@@ -1,4 +1,4 @@
-﻿﻿<?php
+<?php
 require_once '../../config.php';
 requireLogin();
 
@@ -19,6 +19,18 @@ function getNextPrinterNo($pdo)
 }
 
 // --- Excel Export (xlsx via SpreadsheetML + ZipArchive) ---
+// --- CSV Template Download ---
+if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="printers_template.csv"');
+    $output = fopen('php://output', 'w');
+    fputs($output, "\xEF\xBB\xBF");
+    fputcsv($output, ['No.', 'Printer No.', 'Building', 'Floor', 'Department', 'Person Responsible', 'Date Issued', 'Signature', 'Remarks']);
+    fputcsv($output, ['1', 'PRN-001', 'Main Building', '2F', 'Accounting', 'Juan Dela Cruz', '2026-01-15', '', 'Operational']);
+    fclose($output);
+    exit;
+}
+
 if (isset($_GET['export']) && $_GET['export'] === 'excel') {
     $stmt = $pdo->query("SELECT * FROM printers ORDER BY id ASC");
     $items = $stmt->fetchAll();
@@ -454,6 +466,13 @@ $row_offset = $offset;
 
 $next_printer_no = getNextPrinterNo($pdo);
 
+// Stats
+$total_printers   = (int)$pdo->query("SELECT COUNT(*) FROM printers")->fetchColumn();
+$issued_printers  = (int)$pdo->query("SELECT COUNT(*) FROM printers WHERE date_issued IS NOT NULL")->fetchColumn();
+$unissued_printers = max(0, $total_printers - $issued_printers);
+$total_locations  = (int)$pdo->query("SELECT COUNT(DISTINCT location) FROM printers WHERE location IS NOT NULL AND location != ''")->fetchColumn();
+$with_user        = (int)$pdo->query("SELECT COUNT(*) FROM printers WHERE person_responsible IS NOT NULL AND person_responsible != ''")->fetchColumn();
+
 $page_title = "Canon LBP 2900 Printers";
 if (!$is_ajax) {
     require_once '../../includes/header.php';
@@ -463,60 +482,120 @@ if (!$is_ajax) {
 
 <?php if (!$is_ajax): ?>
     <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark">
-        <header
-            class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+        <!-- Header -->
+        <header class="mb-6 flex flex-col md:flex-row items-start md:items-end justify-between gap-4">
             <div>
-                <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Canon LBP 2900 Printers</h2>
-                <p class="text-sm text-slate-500 mt-1">Printer Inventory &amp; Issuance Records</p>
+                <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">Printer Inventory</span>
+                    <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Canon LBP 2900 Printers</h2>
+                </div>
+                <p class="text-xs text-slate-500 mt-1">Printer inventory, deployments, and issuance records.</p>
             </div>
-            <div class="no-print flex items-center gap-2 md:gap-3 flex-wrap">
-                <a href="?export=excel"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-blue-600 text-white hover:bg-blue-700 transition-colors text-xs font-bold no-print">
-                    <span class="material-symbols-outlined text-[18px] mr-2">download</span> Export Excel
-                </a>
-                <button onclick="toggleModal('importModal')"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-amber-600 text-white hover:bg-amber-700 transition-colors text-xs font-bold no-print">
-                    <span class="material-symbols-outlined text-[18px] mr-2">upload</span> Import CSV
-                </button>
-                <button onclick="printData()"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-slate-800 dark:bg-slate-700 text-white hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors text-xs font-bold no-print">
-                    <span class="material-symbols-outlined text-[18px] mr-2">print</span> Print
-                </button>
+            <div class="no-print flex items-center gap-2 flex-wrap">
                 <button onclick="toggleModal('addPrinterModal')"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-primary text-white hover:bg-primary/90 transition-colors text-xs font-bold shadow-lg shadow-primary/20 no-print">
-                    <span class="material-symbols-outlined text-[18px] mr-2">add</span> Add Printer
+                    class="flex items-center gap-1.5 rounded-lg h-9 px-3.5 bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[17px]">add</span>
+                    <span>Add Printer</span>
+                </button>
+                <button onclick="toggleModal('importModal')"
+                    class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[17px]">upload_file</span>
+                    <span>Import CSV</span>
+                </button>
+                <a href="?export=excel"
+                    class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[17px]">table_chart</span>
+                    <span>Export Excel</span>
+                </a>
+                <button onclick="printData()"
+                    class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all text-xs font-bold shadow-sm">
+                    <span class="material-symbols-outlined text-[17px]">print</span>
+                    <span>Print</span>
                 </button>
             </div>
         </header>
 
+        <!-- Alerts -->
         <?php if ($success_msg): ?>
-            <div
-                class="mb-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-                <span class="material-symbols-outlined">check_circle</span>
-                <?= htmlspecialchars($success_msg) ?>
+            <div class="mb-5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]">check_circle</span>
+                    <span><?= htmlspecialchars($success_msg) ?></span>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-emerald-500 hover:text-emerald-400">
+                    <span class="material-symbols-outlined text-[16px]">close</span>
+                </button>
             </div>
         <?php endif; ?>
         <?php if ($error_msg): ?>
-            <div
-                class="mb-6 bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-                <span class="material-symbols-outlined">error</span>
-                <?= htmlspecialchars($error_msg) ?>
+            <div class="mb-5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]">error</span>
+                    <span><?= htmlspecialchars($error_msg) ?></span>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-400">
+                    <span class="material-symbols-outlined text-[16px]">close</span>
+                </button>
             </div>
         <?php endif; ?>
 
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Total Printers</span>
+                    <span class="material-symbols-outlined text-primary text-[18px]">print</span>
+                </div>
+                <div class="text-2xl font-bold text-slate-800 dark:text-white mt-1"><?= number_format($total_printers) ?></div>
+                <span class="text-[10px] text-slate-400">Total registered units</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Issued Units</span>
+                    <span class="material-symbols-outlined text-emerald-500 text-[18px]">task_alt</span>
+                </div>
+                <div class="text-2xl font-bold text-emerald-500 mt-1"><?= number_format($issued_printers) ?></div>
+                <span class="text-[10px] text-slate-400">Deployed to wards/offices</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">In Stock / Pool</span>
+                    <span class="material-symbols-outlined text-blue-500 text-[18px]">inventory_2</span>
+                </div>
+                <div class="text-2xl font-bold text-blue-500 mt-1"><?= number_format($unissued_printers) ?></div>
+                <span class="text-[10px] text-slate-400">Available for assignment</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Locations</span>
+                    <span class="material-symbols-outlined text-indigo-500 text-[18px]">location_on</span>
+                </div>
+                <div class="text-2xl font-bold text-indigo-500 mt-1"><?= number_format($total_locations) ?></div>
+                <span class="text-[10px] text-slate-400">Offices with units</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm col-span-2 sm:col-span-1">
+                <div class="flex items-center justify-between">
+                    <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Assigned Users</span>
+                    <span class="material-symbols-outlined text-amber-500 text-[18px]">person</span>
+                </div>
+                <div class="text-2xl font-bold text-amber-500 mt-1"><?= number_format($with_user) ?></div>
+                <span class="text-[10px] text-slate-400">With designated custodian</span>
+            </div>
+        </div>
+
         <!-- Control Bar -->
-        <div class="no-print mb-6 flex gap-3">
-            <form method="GET" class="flex items-center gap-3 flex-wrap w-full">
-                <div class="relative group">
-                    <span
-                        class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500">search</span>
+        <div class="bg-white dark:bg-[#161d2b] p-3 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm mb-4 no-print">
+            <form method="GET" class="flex flex-wrap items-center gap-2">
+                <div class="relative flex-1 min-w-[220px]">
+                    <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
                     <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>"
                         placeholder="Search Printer No, Location, Person..."
-                        class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 text-xs rounded-xl pl-9 pr-4 py-2 focus:ring-2 focus:ring-primary w-64">
+                        class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-800 dark:text-slate-200 focus:outline-none focus:border-primary">
                 </div>
 
+                <!-- Sort -->
                 <select name="sort" onchange="this.form.submit()"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
+                    class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                     <option value="id_asc" <?= $sort_by === 'id_asc' ? 'selected' : '' ?>>No. (Oldest First)</option>
                     <option value="id_desc" <?= $sort_by === 'id_desc' ? 'selected' : '' ?>>No. (Newest First)</option>
                     <option value="date_asc" <?= $sort_by === 'date_asc' ? 'selected' : '' ?>>Date Issued (Asc)</option>
@@ -524,33 +603,19 @@ if (!$is_ajax) {
                     <option value="office_asc" <?= $sort_by === 'office_asc' ? 'selected' : '' ?>>Location (A-Z)</option>
                 </select>
 
-                <!-- Pagination Controls -->
-                <div class="flex items-center gap-2 ml-auto">
-                    <?php if ($total_pages > 1): ?>
-                        <span class="text-xs text-slate-500 mr-2">Page
-                            <?= $page ?> of
-                            <?= $total_pages ?>
-                        </span>
-                        <div
-                            class="flex h-9 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-xl overflow-hidden mr-2">
-                            <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&limit=<?= $limit_param ?>&sort=<?= $sort_by ?>"
-                                class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-r border-slate-200 dark:border-[#232b3d] <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>">
-                                <span class="material-symbols-outlined text-[18px]">chevron_left</span>
-                            </a>
-                            <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&limit=<?= $limit_param ?>&sort=<?= $sort_by ?>"
-                                class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>">
-                                <span class="material-symbols-outlined text-[18px]">chevron_right</span>
-                            </a>
-                        </div>
-                    <?php endif; ?>
-                    <select name="limit" onchange="this.form.submit()"
-                        class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
-                        <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                        <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                        <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                        <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                    </select>
-                </div>
+                <!-- Per page -->
+                <select name="limit" onchange="this.form.submit()"
+                    class="px-2 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                    <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>15</option>
+                    <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>50</option>
+                    <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>100</option>
+                    <option value="all" <?= $limit_param === 'all' ? 'selected' : '' ?>>All</option>
+                </select>
+
+                <button type="submit" class="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-[#232b3d] hover:bg-slate-300 dark:hover:bg-[#2e384e] text-slate-700 dark:text-slate-300 text-xs font-bold transition-all">Filter</button>
+                <?php if ($search_term !== ''): ?>
+                    <a href="index.php" class="px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 text-xs font-semibold">Clear</a>
+                <?php endif; ?>
             </form>
         </div>
 
@@ -937,27 +1002,49 @@ if (!$is_ajax) {
     </style>
 
     <!-- Import CSV Modal -->
+    <!-- Import Modal -->
     <div id="importModal" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog">
         <div class="flex items-center justify-center min-h-screen px-4">
-            <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
-            <div
-                class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-lg w-full p-4 sm:p-6 shadow-2xl">
-                <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-4">Import Printers from CSV / Excel</h3>
-                <p class="text-sm text-slate-400 mb-2">Upload a CSV file matching the exported column layout:</p>
-                <div class="mb-4 rounded-xl bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] px-4 py-2 text-[11px] text-slate-500 font-mono leading-relaxed">
-                    No. &nbsp;|&nbsp; Printer No. &nbsp;|&nbsp; <span class="text-amber-500">Building</span> &nbsp;|&nbsp; <span class="text-amber-500">Floor</span> &nbsp;|&nbsp; Department &nbsp;|&nbsp; Person Responsible &nbsp;|&nbsp; Date Issued &nbsp;|&nbsp; Signature &nbsp;|&nbsp; Remarks
+            <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
+            <div class="relative bg-white dark:bg-[#1a2130] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200 dark:border-[#232b3d]">
+                <div class="flex items-center justify-between border-b border-slate-200 dark:border-[#232b3d] pb-3 mb-4">
+                    <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <span class="material-symbols-outlined text-amber-600">upload_file</span> Import Printers from CSV
+                    </h3>
+                    <button type="button" onclick="toggleModal('importModal')" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
                 </div>
-                <form method="POST" enctype="multipart/form-data">
+
+                <form method="POST" enctype="multipart/form-data" class="space-y-4">
                     <?= getCsrfInput() ?>
                     <input type="hidden" name="action" value="import_csv">
-                    <div class="mb-4">
-                        <input type="file" name="csv_file" accept=".csv,.xlsx" required
-                            class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-white rounded-xl px-4 py-2.5 text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-amber-600 file:text-white hover:file:bg-amber-700">
+
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select CSV File</label>
+                        <input type="file" name="csv_file" accept=".csv" required
+                            class="w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500/10 file:text-amber-600 hover:file:bg-amber-500/20 file:cursor-pointer border border-slate-200 dark:border-[#232b3d] rounded-xl p-2 bg-slate-50 dark:bg-[#101622]">
                     </div>
-                    <div class="flex justify-end gap-3">
-                        <button type="button" onclick="toggleModal('importModal')"
-                            class="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-xs">Cancel</button>
-                        <button type="submit" class="px-6 py-2 bg-amber-600 text-white font-bold rounded-xl text-xs">Import</button>
+
+                    <div class="p-3 bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl text-xs space-y-1 text-slate-600 dark:text-slate-400">
+                        <p class="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-[16px] text-amber-500">info</span> Supported Formats:
+                        </p>
+                        <p>&bull; Standard Printers CSV format (9 columns matching system export).</p>
+                        <p>&bull; Layout: No., Printer No., Building, Floor, Department, Person Responsible, Date Issued, Signature, Remarks.</p>
+                        <p>&bull; Existing records matching Printer No. are automatically validated.</p>
+                        <div class="pt-2">
+                            <a href="?download_template=csv" class="inline-flex items-center gap-1 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
+                                <span class="material-symbols-outlined text-[14px]">download</span> Download CSV Template
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-[#232b3d]">
+                        <button type="button" onclick="toggleModal('importModal')" class="px-5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-[#232b3d] transition-colors">Cancel</button>
+                        <button type="submit" class="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 flex items-center gap-1.5 shadow-sm transition-colors">
+                            <span class="material-symbols-outlined text-[16px]">upload</span> Upload &amp; Import
+                        </button>
                     </div>
                 </form>
             </div>

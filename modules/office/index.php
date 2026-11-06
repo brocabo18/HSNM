@@ -1,4 +1,4 @@
-﻿﻿<?php
+<?php
 require_once '../../config.php';
 requireLogin();
 
@@ -200,9 +200,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // --- Data Fetching & Search ---
-// --- Data Fetching & Search ---
 $search_term = $_GET['search'] ?? '';
-$department_filter = $_GET['department'] ?? 'All';
+$version_filter = $_GET['version'] ?? '';
 $sort_by = $_GET['sort'] ?? 'id_desc';
 
 $where_clauses = ["1=1"];
@@ -213,8 +212,21 @@ if ($search_term) {
     $term = "%$search_term%";
     $params = [$term, $term, $term, $term, $term, $term, $term];
 }
+if ($version_filter) {
+    $where_clauses[] = "ms_office_version = ?";
+    $params[] = $version_filter;
+}
 
 $where_sql = implode(' AND ', $where_clauses);
+
+// System-wide stats
+$total_licenses = (int)($pdo->query("SELECT COUNT(*) FROM office_licenses")->fetchColumn() ?: 0);
+$with_keys = (int)($pdo->query("SELECT COUNT(*) FROM office_licenses WHERE product_key IS NOT NULL AND product_key != ''")->fetchColumn() ?: 0);
+$with_emails = (int)($pdo->query("SELECT COUNT(*) FROM office_licenses WHERE email IS NOT NULL AND email != ''")->fetchColumn() ?: 0);
+$unique_versions = (int)($pdo->query("SELECT COUNT(DISTINCT ms_office_version) FROM office_licenses WHERE ms_office_version IS NOT NULL AND ms_office_version != ''")->fetchColumn() ?: 0);
+$unique_depts = (int)($pdo->query("SELECT COUNT(DISTINCT department) FROM office_licenses WHERE department IS NOT NULL AND department != ''")->fetchColumn() ?: 0);
+
+$versions_list = $pdo->query("SELECT DISTINCT ms_office_version FROM office_licenses WHERE ms_office_version IS NOT NULL AND ms_office_version != '' ORDER BY ms_office_version")->fetchAll(PDO::FETCH_COLUMN);
 
 // Sorting
 $order_by = "id DESC"; // Default
@@ -323,83 +335,117 @@ require_once '../../includes/sidebar.php';
 ?>
 
 <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark">
-    <header
-        class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+    <!-- Page Header -->
+    <div class="mb-6 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 no-print">
         <div>
+            <div class="flex items-center gap-2 mb-1">
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">License Management</span>
+            </div>
             <h2 class="text-2xl font-bold text-slate-900 dark:text-white">MS Office Licenses</h2>
-            <p class="text-sm text-slate-500 mt-1">Manage Microsoft Office product keys and accounts.</p>
+            <p class="text-xs text-slate-400 mt-0.5">Manage Microsoft Office product keys, accounts, and version activations.</p>
         </div>
-        <div class="no-print flex items-center gap-2 md:gap-3 flex-wrap">
-            <a href="?export=csv"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-blue-600 text-white hover:bg-blue-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">download</span> Export CSV
-            </a>
-            <!-- Sync from Computer Inventory -->
-            <form method="POST" onsubmit="return confirm('Sync MS Office versions from Computer Inventory into all matching license records?');" style="display:inline;">
+        <div class="no-print flex items-center gap-2 flex-wrap">
+            <button onclick="toggleModal('addModal')"
+                class="flex items-center gap-1.5 px-3.5 h-9 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[16px]">add</span> Add License
+            </button>
+            <form method="POST" onsubmit="return confirm('Sync MS Office versions from Computer Inventory into all matching license records?');" style="display:inline; margin:0;">
                 <?= getCsrfInput() ?>
                 <input type="hidden" name="action" value="sync_from_computers">
                 <button type="submit"
-                    class="flex items-center justify-center rounded-lg h-9 px-4 bg-violet-600 text-white hover:bg-violet-700 transition-colors text-xs font-bold no-print">
-                    <span class="material-symbols-outlined text-[18px] mr-2">sync</span> Sync from Computers
+                    class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[16px]">sync</span> Sync from Computers
                 </button>
             </form>
+            <a href="?export=csv"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[16px]">download</span> Export CSV
+            </a>
             <button onclick="printData()"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-slate-800 dark:bg-slate-700 text-white hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors text-xs font-bold no-print">
-                <span class="material-symbols-outlined text-[18px] mr-2">print</span> Print
+                class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#232b3d] text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[16px]">print</span> Print
             </button>
-            <button onclick="toggleModal('addModal')"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-primary text-white hover:bg-primary/90 transition-colors text-xs font-bold shadow-lg shadow-primary/20 no-print">
-                <span class="material-symbols-outlined text-[18px] mr-2">add</span> Add License
-            </button>
-        </div>
-    </header>
-
-    <?php if ($success_msg): ?>
-        <div
-            class="mb-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">check_circle</span>
-            <?= htmlspecialchars($success_msg) ?>
-        </div>
-    <?php endif; ?>
-
-    <?php if ($error_msg): ?>
-        <div
-            class="mb-6 bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">error</span>
-            <?= htmlspecialchars($error_msg) ?>
-        </div>
-    <?php endif; ?>
-
-    <!-- Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-        <div
-            class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl text-center">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total Licenses</div>
-            <div class="text-2xl font-bold text-slate-900 dark:text-white">
-                <?= number_format($total_items) ?>
-            </div>
-        </div>
-        <div
-            class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl text-center">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Showing</div>
-            <div class="text-2xl font-bold text-emerald-500">
-                <?= number_format(count($licenses)) ?>
-            </div>
         </div>
     </div>
 
-    <!-- Control Bar -->
-    <div class="no-print mb-6 flex gap-3">
-        <form method="GET" class="flex items-center gap-3 flex-wrap w-full">
-            <div class="relative group">
-                <span
-                    class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500">search</span>
-                <input type="text" name="search" value="<?= htmlspecialchars($search_term) ?>" placeholder="Search..."
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 text-xs rounded-xl pl-9 pr-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent w-64">
+    <!-- Notification Alerts -->
+    <?php if ($success_msg): ?>
+        <div class="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center justify-between no-print">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">check_circle</span>
+                <?= htmlspecialchars($success_msg) ?>
             </div>
+            <button onclick="this.parentElement.remove()" class="text-emerald-500/60 hover:text-emerald-500"><span class="material-symbols-outlined text-sm">close</span></button>
+        </div>
+    <?php endif; ?>
+    <?php if ($error_msg): ?>
+        <div class="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center justify-between no-print">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">error</span>
+                <?= htmlspecialchars($error_msg) ?>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-red-500/60 hover:text-red-500"><span class="material-symbols-outlined text-sm">close</span></button>
+        </div>
+    <?php endif; ?>
 
-            <select name="sort" onchange="this.form.submit()"
-                class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
+    <!-- Stats Cards Grid -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6 no-print">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Licenses</span>
+                <span class="material-symbols-outlined text-primary text-base">workspace_premium</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-slate-900 dark:text-white"><?= number_format($total_licenses) ?></p>
+            <span class="text-[10px] text-slate-400">Total registered licenses</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Product Keys</span>
+                <span class="material-symbols-outlined text-emerald-500 text-base">vpn_key</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-emerald-500"><?= number_format($with_keys) ?></p>
+            <span class="text-[10px] text-slate-400">Keys registered</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Account Emails</span>
+                <span class="material-symbols-outlined text-amber-500 text-base">mail</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-amber-500"><?= number_format($with_emails) ?></p>
+            <span class="text-[10px] text-slate-400">Active accounts linked</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Versions</span>
+                <span class="material-symbols-outlined text-purple-500 text-base">app_registration</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-purple-400"><?= number_format($unique_versions) ?></p>
+            <span class="text-[10px] text-slate-400">Distinct editions</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Departments</span>
+                <span class="material-symbols-outlined text-blue-500 text-base">corporate_fare</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-blue-400"><?= number_format($unique_depts) ?></p>
+            <span class="text-[10px] text-slate-400">Covered divisions</span>
+        </div>
+    </div>
+
+    <!-- Filter / Control Bar -->
+    <div class="bg-white dark:bg-[#161d2b] p-3 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm mb-4 no-print">
+        <form method="GET" class="flex flex-wrap items-center gap-2">
+            <div class="relative flex-1 min-w-[200px]">
+                <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+                <input type="text" name="search" value="<?= htmlspecialchars($search_term) ?>" placeholder="Search Control #, Dept, Key, Email, Remarks..." class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-primary">
+            </div>
+            <select name="version" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="">All Versions</option>
+                <?php foreach ($versions_list as $ver_item): ?>
+                    <option value="<?= htmlspecialchars($ver_item) ?>" <?= ($version_filter === $ver_item) ? 'selected' : '' ?>><?= htmlspecialchars($ver_item) ?></option>
+                <?php endforeach; ?>
+            </select>
+            <select name="sort" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                 <option value="id_desc" <?= $sort_by === 'id_desc' ? 'selected' : '' ?>>Newest First</option>
                 <option value="id_asc" <?= $sort_by === 'id_asc' ? 'selected' : '' ?>>Oldest First</option>
                 <option value="control_asc" <?= $sort_by === 'control_asc' ? 'selected' : '' ?>>Control# (A-Z)</option>
@@ -407,33 +453,35 @@ require_once '../../includes/sidebar.php';
                 <option value="dept_asc" <?= $sort_by === 'dept_asc' ? 'selected' : '' ?>>Dept (A-Z)</option>
                 <option value="dept_desc" <?= $sort_by === 'dept_desc' ? 'selected' : '' ?>>Dept (Z-A)</option>
             </select>
+            <select name="limit" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>15</option>
+                <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>50</option>
+                <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>100</option>
+                <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>200</option>
+                <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>All</option>
+            </select>
+            <button type="submit" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white transition-all shadow-sm">
+                Filter
+            </button>
+            <?php if ($search_term || $version_filter || $sort_by !== 'id_desc' || $limit_param !== '15'): ?>
+                <a href="index.php" class="px-2.5 py-1.5 text-xs font-medium text-red-500 hover:text-red-600 transition-colors">
+                    Clear
+                </a>
+            <?php endif; ?>
 
-            <!-- Top Pagination -->
-            <div class="flex items-center gap-2 ml-auto">
-                <?php if ($total_pages > 1): ?>
-                    <span class="text-xs text-slate-500 mr-2">Page <?= $page ?> of <?= $total_pages ?></span>
-                    <div
-                        class="flex h-9 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-xl overflow-hidden mr-2">
-                        <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&sort=<?= $sort_by ?>&limit=<?= $limit_param ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-r border-slate-200 dark:border-[#232b3d] <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_left</span>
-                        </a>
-                        <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&sort=<?= $sort_by ?>&limit=<?= $limit_param ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_right</span>
-                        </a>
-                    </div>
-                <?php endif; ?>
-                <select name="limit" onchange="this.form.submit()"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
-                    <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                    <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                    <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                    <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>Show: 200</option>
-                    <option value="500" <?= $limit_param == '500' ? 'selected' : '' ?>>Show: 500</option>
-                    <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                </select>
-            </div>
+            <?php if ($total_pages > 1): ?>
+                <div class="ml-auto flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Page <?= $page ?> of <?= $total_pages ?></span>
+                    <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&version=<?= urlencode($version_filter) ?>&sort=<?= $sort_by ?>&limit=<?= $limit_param ?>"
+                        class="p-1 rounded bg-slate-100 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 <?= $page <= 1 ? 'pointer-events-none opacity-40' : 'hover:bg-slate-200 dark:hover:bg-[#232b3d]' ?>">
+                        <span class="material-symbols-outlined text-sm block">chevron_left</span>
+                    </a>
+                    <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&version=<?= urlencode($version_filter) ?>&sort=<?= $sort_by ?>&limit=<?= $limit_param ?>"
+                        class="p-1 rounded bg-slate-100 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 <?= $page >= $total_pages ? 'pointer-events-none opacity-40' : 'hover:bg-slate-200 dark:hover:bg-[#232b3d]' ?>">
+                        <span class="material-symbols-outlined text-sm block">chevron_right</span>
+                    </a>
+                </div>
+            <?php endif; ?>
         </form>
     </div>
 
@@ -478,21 +526,21 @@ require_once '../../includes/sidebar.php';
                                 </td>
                                 <td class="px-2 py-1 font-mono text-slate-900 dark:text-white cursor-pointer hover:bg-primary/10 hover:text-primary transition-colors"
                                     onclick='openEditModal(<?= json_encode($item) ?>)' title="Click to edit">
-                                    <?= htmlspecialchars($item['control_number']) ?>
+                                    <?= htmlspecialchars($item['control_number'] ?? '') ?>
                                 </td>
                                 <td class="px-2 py-1 text-slate-600 dark:text-slate-400">
-                                    <?= htmlspecialchars($item['department']) ?>
+                                    <?= htmlspecialchars($item['department'] ?? '') ?>
                                 </td>
                                 <td class="px-2 py-1 text-slate-600 dark:text-slate-400">
-                                    <?= htmlspecialchars($item['ms_office_version']) ?>
+                                    <?= htmlspecialchars($item['ms_office_version'] ?? '') ?>
                                 </td>
                                 <td class="px-2 py-1 text-slate-600 dark:text-slate-400 font-mono">
-                                    <?= htmlspecialchars($item['product_key']) ?>
+                                    <?= htmlspecialchars($item['product_key'] ?? '') ?>
                                 </td>
-                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400"><?= htmlspecialchars($item['email']) ?>
+                                <td class="px-2 py-1 text-slate-600 dark:text-slate-400"><?= htmlspecialchars($item['email'] ?? '') ?>
                                 </td>
                                 <td class="px-2 py-1 text-slate-600 dark:text-slate-400 font-mono">
-                                    <?= htmlspecialchars($item['password']) ?>
+                                    <?= htmlspecialchars($item['password'] ?? '') ?>
                                 </td>
                                 <td class="no-print px-2 py-1 whitespace-nowrap">
                                     <?php if (!empty($item['last_edited_by'])): ?>

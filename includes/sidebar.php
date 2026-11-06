@@ -6,10 +6,26 @@ if (strpos($current_path, '/modules/routers') !== false)
     $active_page = 'routers';
 elseif (strpos($current_path, '/modules/switches') !== false)
     $active_page = 'switches';
+elseif (strpos($current_path, '/modules/ips_jasmc_st') !== false)
+    $active_page = 'ips_jasmc_st';
+elseif (strpos($current_path, '/modules/ips_jasmc_vt') !== false)
+    $active_page = 'ips_jasmc_vt';
+elseif (strpos($current_path, '/modules/ips_doh_jbl_cmc') !== false)
+    $active_page = 'ips_doh_jbl_cmc';
 elseif (strpos($current_path, '/modules/ips') !== false)
     $active_page = 'ips';
 elseif (strpos($current_path, '/modules/computers') !== false)
     $active_page = 'computers';
+elseif (strpos($current_path, '/modules/jasmc_st') !== false)
+    $active_page = 'jasmc_st';
+elseif (strpos($current_path, '/modules/jasmc_vt') !== false)
+    $active_page = 'jasmc_vt';
+elseif (strpos($current_path, '/modules/doh_jbl_cmc') !== false)
+    $active_page = 'doh_jbl_cmc';
+elseif (strpos($current_path, '/modules/assets') !== false)
+    $active_page = 'assets';
+elseif (strpos($current_path, '/modules/maintenance') !== false)
+    $active_page = 'maintenance';
 elseif (strpos($current_path, '/modules/firewall') !== false)
     $active_page = 'firewall';
 elseif (strpos($current_path, '/modules/office') !== false)
@@ -86,6 +102,21 @@ elseif (strpos($current_path, '/modules/settings') !== false)
                 <span class="material-symbols-outlined text-[17px]">dns</span>
                 <span class="text-xs font-medium">IP Addresses</span>
             </a>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'ips_jasmc_st' ? 'bg-primary/10 text-primary font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/ips_jasmc_st/" title="JASMC &mdash; Sto. Tomas IP Addresses">
+                <span class="material-symbols-outlined text-[15px]">subdirectory_arrow_right</span>
+                <span class="text-xs font-medium">JASMC-ST</span>
+            </a>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'ips_jasmc_vt' ? 'bg-primary/10 text-primary font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/ips_jasmc_vt/" title="JASMC &mdash; Victoria Tarlac IP Addresses">
+                <span class="material-symbols-outlined text-[15px]">subdirectory_arrow_right</span>
+                <span class="text-xs font-medium">JASMC-VT</span>
+            </a>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'ips_doh_jbl_cmc' ? 'bg-primary/10 text-primary font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/ips_doh_jbl_cmc/" title="DOH-JBL Children's Medical Center IP Addresses">
+                <span class="material-symbols-outlined text-[15px]">subdirectory_arrow_right</span>
+                <span class="text-xs font-medium">DOH-JBL-CMC</span>
+            </a>
         <?php endif; ?>
 
         <?php if (canAccessModule('computers')): ?>
@@ -93,6 +124,46 @@ elseif (strpos($current_path, '/modules/settings') !== false)
                 href="<?= BASE_URL ?>/modules/computers/">
                 <span class="material-symbols-outlined text-[17px]">computer</span>
                 <span class="text-xs font-medium">Computers</span>
+            </a>
+        <?php endif; ?>
+
+        <?php if (canAccessModule('computers')): ?>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'jasmc_st' ? 'bg-primary/10 text-primary font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/jasmc_st/" title="JASMC &mdash; Sto. Tomas">
+                <span class="material-symbols-outlined text-[15px]">subdirectory_arrow_right</span>
+                <span class="text-xs font-medium">JASMC-ST</span>
+            </a>
+        <?php endif; ?>
+
+        <?php if (canAccessModule('computers')): ?>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'jasmc_vt' ? 'bg-primary/10 text-primary font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/jasmc_vt/" title="JASMC &mdash; Victoria Tarlac">
+                <span class="material-symbols-outlined text-[15px]">subdirectory_arrow_right</span>
+                <span class="text-xs font-medium">JASMC-VT</span>
+            </a>
+        <?php endif; ?>
+
+        <?php if (canAccessModule('computers')): ?>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'doh_jbl_cmc' ? 'bg-primary/10 text-primary font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/doh_jbl_cmc/" title="DOH-JBL Children's Medical Center">
+                <span class="material-symbols-outlined text-[15px]">subdirectory_arrow_right</span>
+                <span class="text-xs font-medium">DOH-JBL-CMC</span>
+            </a>
+        <?php endif; ?>
+
+        <?php if (canAccessModule('computers')): ?>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg <?= $active_page === 'assets' ? 'bg-primary/10 text-primary font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/assets/">
+                <span class="material-symbols-outlined text-[17px]">inventory_2</span>
+                <span class="text-xs font-medium">Asset Inventory</span>
+            </a>
+        <?php endif; ?>
+
+        <?php if (canAccessModule('computers')): ?>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg <?= $active_page === 'maintenance' ? 'bg-primary/10 text-primary font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/maintenance/">
+                <span class="material-symbols-outlined text-[17px]">build</span>
+                <span class="text-xs font-medium">Maintenance</span>
             </a>
         <?php endif; ?>
 
@@ -242,5 +313,12 @@ elseif (strpos($current_path, '/modules/settings') !== false)
             <span
                 class="material-symbols-outlined text-slate-500 group-hover:text-red-400 transition-colors">logout</span>
         </a>
+
+        <!-- App Version -->
+        <div class="text-center pt-0.5">
+            <a href="<?= BASE_URL ?>/modules/changelog/" class="text-[10px] font-mono text-slate-400 hover:text-primary transition-colors">
+                <?= isset($pdo) ? getAppVersion($pdo) : 'v1.15.2' ?>
+            </a>
+        </div>
     </div>
 </aside>

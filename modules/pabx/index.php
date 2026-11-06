@@ -1,8 +1,20 @@
-﻿﻿<?php
+<?php
 require_once '../../config.php';
 requireLogin();
 
 // Handle CSV Export
+// --- CSV Template Download ---
+if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="pabx_directory_template.csv"');
+    $output = fopen('php://output', 'w');
+    fputs($output, "\xEF\xBB\xBF");
+    fputcsv($output, ['Local Number', 'IP Address', 'Department', 'Building', 'Floor', 'Display Name']);
+    fputcsv($output, ['101', '192.168.1.101', 'Accounting', 'Main Building', '2F', 'Accounting Office']);
+    fclose($output);
+    exit;
+}
+
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $stmt = $pdo->query("SELECT * FROM pabx_directory ORDER BY id ASC");
     $entries = $stmt->fetchAll();
@@ -195,8 +207,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // Stats
-$total_entries = $pdo->query("SELECT COUNT(*) FROM pabx_directory")->fetchColumn();
-$by_building = $pdo->query("SELECT COUNT(DISTINCT building) FROM pabx_directory")->fetchColumn();
+$total_entries = (int)($pdo->query("SELECT COUNT(*) FROM pabx_directory")->fetchColumn() ?: 0);
+$by_building = (int)($pdo->query("SELECT COUNT(DISTINCT building) FROM pabx_directory WHERE building IS NOT NULL AND building != ''")->fetchColumn() ?: 0);
+$by_dept = (int)($pdo->query("SELECT COUNT(DISTINCT department) FROM pabx_directory WHERE department IS NOT NULL AND department != ''")->fetchColumn() ?: 0);
+$with_ip = (int)($pdo->query("SELECT COUNT(*) FROM pabx_directory WHERE ip_address IS NOT NULL AND ip_address != ''")->fetchColumn() ?: 0);
+$without_ip = (int)($pdo->query("SELECT COUNT(*) FROM pabx_directory WHERE ip_address IS NULL OR ip_address = ''")->fetchColumn() ?: 0);
 
 // Filters
 $search_term = $_GET['search'] ?? '';
@@ -297,161 +312,153 @@ require_once '../../includes/sidebar.php';
 ?>
 
 <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark">
-    <header
-        class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+    <!-- Page Header -->
+    <div class="mb-6 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 no-print">
         <div>
+            <div class="flex items-center gap-2 mb-1">
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">Telecommunications</span>
+            </div>
             <h2 class="text-2xl font-bold text-slate-900 dark:text-white">PABX Directory</h2>
-            <p class="text-sm text-slate-500 mt-1">Manage phone directory and extensions.</p>
+            <p class="text-xs text-slate-400 mt-0.5">Manage telephone extensions, VoIP endpoints, and department directory.</p>
         </div>
-        <div class="no-print flex items-center gap-2 md:gap-3 flex-wrap">
-            <a href="?export=csv"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-blue-600 text-white hover:bg-blue-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">download</span> Export CSV
-            </a>
-            <button onclick="toggleModal('importModal')"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-amber-600 text-white hover:bg-amber-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">upload</span> Import CSV
-            </button>
-            <button onclick="printData()"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-slate-600 text-white hover:bg-slate-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">print</span> Print
-            </button>
+        <div class="no-print flex items-center gap-2 flex-wrap">
             <button onclick="toggleModal('addEntryModal')"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-primary text-white hover:bg-primary/90 transition-colors text-xs font-bold shadow-lg shadow-primary/20">
-                <span class="material-symbols-outlined text-[18px] mr-2">add</span> Add Entry
+                class="flex items-center gap-1.5 px-3.5 h-9 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[16px]">add</span> Add Entry
             </button>
-        </div>
-    </header>
-
-    <?php if ($success_msg): ?>
-        <div
-            class="mb-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">check_circle</span>
-            <?= htmlspecialchars($success_msg) ?>
-        </div>
-    <?php endif; ?>
-    <?php if ($error_msg): ?>
-        <div
-            class="mb-6 bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">error</span>
-            <?= htmlspecialchars($error_msg) ?>
-        </div>
-    <?php endif; ?>
-
-    <!-- Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total Entries</div>
-            <div class="text-2xl font-bold text-slate-900 dark:text-white">
-                <?= number_format($total_entries) ?>
-            </div>
-        </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Buildings Covered</div>
-            <div class="text-2xl font-bold text-emerald-500">
-                <?= number_format($by_building) ?>
-            </div>
-        </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Showing Results</div>
-            <div class="text-2xl font-bold text-amber-500">
-                <?= number_format($total_items) ?>
-            </div>
+            <button onclick="toggleModal('importModal')"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[16px]">upload_file</span> Import CSV
+            </button>
+            <a href="?export=csv"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[16px]">download</span> Export CSV
+            </a>
+            <button onclick="printData()"
+                class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#232b3d] text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[16px]">print</span> Print
+            </button>
         </div>
     </div>
 
-    <!-- Control Bar -->
-    <div class="no-print mb-6">
-        <form method="GET" class="flex flex-col gap-2">
-            <!-- Row 1: Pagination -->
-            <div class="flex items-center gap-2 flex-wrap">
-                <?php if ($total_pages > 1): ?>
-                    <span class="text-xs text-slate-500">Page
-                        <?= $page ?> of
-                        <?= $total_pages ?>
-                    </span>
-                    <div
-                        class="flex h-9 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-xl overflow-hidden">
-                        <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&building=<?= urlencode($filter_building) ?>&floor=<?= urlencode($filter_floor) ?>&limit=<?= $limit ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-r border-slate-200 dark:border-[#232b3d] <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_left</span>
-                        </a>
-                        <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&building=<?= urlencode($filter_building) ?>&floor=<?= urlencode($filter_floor) ?>&limit=<?= $limit ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_right</span>
-                        </a>
-                    </div>
-                <?php endif; ?>
-                <select name="limit" onchange="this.form.submit()"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
-                    <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                    <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                    <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                    <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>Show: 200</option>
-                    <option value="500" <?= $limit_param == '500' ? 'selected' : '' ?>>Show: 500</option>
-                    <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                </select>
+    <!-- Notification Alerts -->
+    <?php if ($success_msg): ?>
+        <div class="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center justify-between no-print">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">check_circle</span>
+                <?= htmlspecialchars($success_msg) ?>
             </div>
-            <!-- Row 2: Search & Filters -->
-            <div class="flex items-center gap-3 flex-wrap">
-                <div class="relative group">
-                    <span
-                        class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500">search</span>
-                    <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>"
-                        placeholder="Search..."
-                        class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 text-xs rounded-xl pl-9 pr-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent w-64">
-                </div>
-                <input type="hidden" name="building" id="hid_building" value="<?= htmlspecialchars($filter_building) ?>">
-                <input type="hidden" name="floor"    id="hid_floor"    value="<?= htmlspecialchars($filter_floor) ?>">
-                <?php
-                $pb_ac=''; $pb_av='';
-                if($filter_building!=='All'&&$filter_building!==''){$pb_ac='building';$pb_av=$filter_building;}
-                elseif($filter_floor!=='All'&&$filter_floor!=='')  {$pb_ac='floor';   $pb_av=$filter_floor;}
-                ?>
-                <select id="pb_cat" onchange="pbOnCat(this.value)"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2">
-                    <option value="">Filter by...</option>
-                    <option value="building" <?= $pb_ac==='building'?'selected':'' ?>>Building</option>
-                    <option value="floor"    <?= $pb_ac==='floor'   ?'selected':'' ?>>Floor</option>
-                </select>
-                <select id="pb_val" onchange="pbApply(this.value)"
-                    class="<?= $pb_ac?'':'hidden' ?> bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2">
-                </select>
-                <?php if($pb_ac): ?>
-                <div class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary text-xs font-semibold rounded-xl">
-                    <span class="material-symbols-outlined text-[13px]">filter_alt</span>
-                    <?= htmlspecialchars($pb_av) ?>
-                    <a href="?search=<?= urlencode($search_term) ?>&sort=<?= urlencode($sort_by) ?>&limit=<?= urlencode($limit_param) ?>" class="ml-1 text-primary/60 hover:text-red-500" title="Clear">
-                        <span class="material-symbols-outlined text-[14px]">close</span>
+            <button onclick="this.parentElement.remove()" class="text-emerald-500/60 hover:text-emerald-500"><span class="material-symbols-outlined text-sm">close</span></button>
+        </div>
+    <?php endif; ?>
+    <?php if ($error_msg): ?>
+        <div class="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center justify-between no-print">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">error</span>
+                <?= htmlspecialchars($error_msg) ?>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-red-500/60 hover:text-red-500"><span class="material-symbols-outlined text-sm">close</span></button>
+        </div>
+    <?php endif; ?>
+
+    <!-- Stats Cards Grid -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6 no-print">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Entries</span>
+                <span class="material-symbols-outlined text-primary text-base">phone_in_talk</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-slate-900 dark:text-white"><?= number_format($total_entries) ?></p>
+            <span class="text-[10px] text-slate-400">Registered extensions</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">IP Lines</span>
+                <span class="material-symbols-outlined text-emerald-500 text-base">lan</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-emerald-500"><?= number_format($with_ip) ?></p>
+            <span class="text-[10px] text-slate-400">VoIP / Network mapped</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Direct / Analog</span>
+                <span class="material-symbols-outlined text-amber-500 text-base">dialpad</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-amber-500"><?= number_format($without_ip) ?></p>
+            <span class="text-[10px] text-slate-400">Direct landlines</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Buildings</span>
+                <span class="material-symbols-outlined text-purple-500 text-base">domain</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-purple-400"><?= number_format($by_building) ?></p>
+            <span class="text-[10px] text-slate-400">Covered facilities</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Departments</span>
+                <span class="material-symbols-outlined text-blue-500 text-base">corporate_fare</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-blue-400"><?= number_format($by_dept) ?></p>
+            <span class="text-[10px] text-slate-400">Distinct hospital units</span>
+        </div>
+    </div>
+
+    <!-- Filter / Control Bar -->
+    <div class="bg-white dark:bg-[#161d2b] p-3 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm mb-4 no-print">
+        <form method="GET" class="flex flex-wrap items-center gap-2">
+            <div class="relative flex-1 min-w-[200px]">
+                <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>" placeholder="Search Local#, IP, Dept, Building, Floor..." class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-primary">
+            </div>
+            <select name="building" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="All">All Buildings</option>
+                <?php foreach ($buildings as $b): ?>
+                    <option value="<?= htmlspecialchars($b) ?>" <?= $filter_building === $b ? 'selected' : '' ?>><?= htmlspecialchars($b) ?></option>
+                <?php endforeach; ?>
+            </select>
+            <select name="floor" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="All">All Floors</option>
+                <?php foreach (['GF','2F','3F','4F','5F','6F','7F'] as $fl): ?>
+                    <option value="<?= $fl ?>" <?= $filter_floor === $fl ? 'selected' : '' ?>><?= $fl ?></option>
+                <?php endforeach; ?>
+            </select>
+            <select name="sort" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="local_asc" <?= $sort_by === 'local_asc' ? 'selected' : '' ?>>Local # (Asc)</option>
+                <option value="local_desc" <?= $sort_by === 'local_desc' ? 'selected' : '' ?>>Local # (Desc)</option>
+                <option value="building_asc" <?= $sort_by === 'building_asc' ? 'selected' : '' ?>>Building (A-Z)</option>
+                <option value="dept_asc" <?= $sort_by === 'dept_asc' ? 'selected' : '' ?>>Department (A-Z)</option>
+            </select>
+            <select name="limit" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>15</option>
+                <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>50</option>
+                <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>100</option>
+                <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>200</option>
+                <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>All</option>
+            </select>
+            <button type="submit" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white transition-all shadow-sm">
+                Filter
+            </button>
+            <?php if ($search_term || ($filter_building !== 'All' && $filter_building !== '') || ($filter_floor !== 'All' && $filter_floor !== '') || $sort_by !== 'local_asc' || $limit_param !== '15'): ?>
+                <a href="index.php" class="px-2.5 py-1.5 text-xs font-medium text-red-500 hover:text-red-600 transition-colors">
+                    Clear
+                </a>
+            <?php endif; ?>
+
+            <?php if ($total_pages > 1): ?>
+                <div class="ml-auto flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Page <?= $page ?> of <?= $total_pages ?></span>
+                    <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&building=<?= urlencode($filter_building) ?>&floor=<?= urlencode($filter_floor) ?>&sort=<?= urlencode($sort_by) ?>&limit=<?= $limit_param ?>"
+                        class="p-1 rounded bg-slate-100 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 <?= $page <= 1 ? 'pointer-events-none opacity-40' : 'hover:bg-slate-200 dark:hover:bg-[#232b3d]' ?>">
+                        <span class="material-symbols-outlined text-sm block">chevron_left</span>
+                    </a>
+                    <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&building=<?= urlencode($filter_building) ?>&floor=<?= urlencode($filter_floor) ?>&sort=<?= urlencode($sort_by) ?>&limit=<?= $limit_param ?>"
+                        class="p-1 rounded bg-slate-100 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 <?= $page >= $total_pages ? 'pointer-events-none opacity-40' : 'hover:bg-slate-200 dark:hover:bg-[#232b3d]' ?>">
+                        <span class="material-symbols-outlined text-sm block">chevron_right</span>
                     </a>
                 </div>
-                <?php endif; ?>
-                <script>
-                const _pbO={building:<?= json_encode(array_values($buildings)) ?>,floor:['GF','2F','3F','4F','5F','6F','7F']};
-                const _pbAC=<?= json_encode($pb_ac) ?>,_pbAV=<?= json_encode($pb_av) ?>;
-                function pbOnCat(c){
-                    const v=document.getElementById('pb_val');
-                    if(!c){v.classList.add('hidden');return;}
-                    ['building','floor'].forEach(function(k){if(k!==c){const h=document.getElementById('hid_'+k);if(h)h.value='All';}});
-                    v.innerHTML='<option value="All">All</option>';
-                    (_pbO[c]||[]).forEach(function(o){const e=document.createElement('option');e.value=o;e.textContent=o;if(c===_pbAC&&o===_pbAV)e.selected=true;v.appendChild(e);});
-                    v.classList.remove('hidden');
-                }
-                function pbApply(val){
-                    const c=document.getElementById('pb_cat').value;if(!c)return;
-                    document.getElementById('hid_'+c).value=val;
-                    document.getElementById('pb_cat').closest('form').submit();
-                }
-                document.addEventListener('DOMContentLoaded',function(){if(_pbAC)pbOnCat(_pbAC);});
-                </script>
-                <select name="sort" onchange="this.form.submit()"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
-                    <option value="id_desc" <?= $sort_by === 'id_desc' ? 'selected' : '' ?>>Newest First</option>
-                    <option value="local_asc" <?= $sort_by === 'local_asc' ? 'selected' : '' ?>>Local Number (A-Z)</option>
-                    <option value="building_asc" <?= $sort_by === 'building_asc' ? 'selected' : '' ?>>Building (A-Z)</option>
-                    <option value="dept_asc" <?= $sort_by === 'dept_asc' ? 'selected' : '' ?>>Department (A-Z)</option>
-                </select>
-            </div>
+            <?php endif; ?>
         </form>
     </div>
 
@@ -720,25 +727,49 @@ require_once '../../includes/sidebar.php';
 </div>
 
 <!-- Modal: Import -->
+<!-- Import Modal -->
 <div id="importModal" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog">
     <div class="flex items-center justify-center min-h-screen px-4">
-        <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
-        <div
-            class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-lg w-full p-4 sm:p-6 shadow-2xl">
-            <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-4">Import PABX Directory from CSV</h3>
-            <p class="text-sm text-slate-400 mb-4">Upload a CSV file with PABX details. Order: Local Number, IP Address,
-                Department, Building, Floor, Display Name</p>
-            <form method="POST" enctype="multipart/form-data">
+        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
+        <div class="relative bg-white dark:bg-[#1a2130] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200 dark:border-[#232b3d]">
+            <div class="flex items-center justify-between border-b border-slate-200 dark:border-[#232b3d] pb-3 mb-4">
+                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span class="material-symbols-outlined text-amber-600">upload_file</span> Import PABX Directory from CSV
+                </h3>
+                <button type="button" onclick="toggleModal('importModal')" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+
+            <form method="POST" enctype="multipart/form-data" class="space-y-4">
                 <?= getCsrfInput() ?>
                 <input type="hidden" name="action" value="import_csv">
-                <div class="mb-4">
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select CSV File</label>
                     <input type="file" name="csv_file" accept=".csv" required
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-white rounded-xl px-4 py-2.5 text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-slate-900 dark:text-white hover:file:bg-primary/90">
+                        class="w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500/10 file:text-amber-600 hover:file:bg-amber-500/20 file:cursor-pointer border border-slate-200 dark:border-[#232b3d] rounded-xl p-2 bg-slate-50 dark:bg-[#101622]">
                 </div>
-                <div class="flex justify-end gap-3">
-                    <button type="button" onclick="toggleModal('importModal')"
-                        class="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">Cancel</button>
-                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl">Import</button>
+
+                <div class="p-3 bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl text-xs space-y-1 text-slate-600 dark:text-slate-400">
+                    <p class="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-[16px] text-amber-500">info</span> Supported Formats:
+                    </p>
+                    <p>&bull; Standard PABX Directory CSV format (6 columns matching system export).</p>
+                    <p>&bull; Columns: Local Number, IP Address, Department, Building, Floor, Display Name.</p>
+                    <p>&bull; Existing local number records are updated automatically.</p>
+                    <div class="pt-2">
+                        <a href="?download_template=csv" class="inline-flex items-center gap-1 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
+                            <span class="material-symbols-outlined text-[14px]">download</span> Download CSV Template
+                        </a>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-[#232b3d]">
+                    <button type="button" onclick="toggleModal('importModal')" class="px-5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-[#232b3d] transition-colors">Cancel</button>
+                    <button type="submit" class="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 flex items-center gap-1.5 shadow-sm transition-colors">
+                        <span class="material-symbols-outlined text-[16px]">upload</span> Upload &amp; Import
+                    </button>
                 </div>
             </form>
         </div>

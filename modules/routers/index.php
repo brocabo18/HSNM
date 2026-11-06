@@ -3,6 +3,18 @@ require_once '../../config.php';
 requireLogin();
 
 // Handle CSV Export
+// --- CSV Template Download ---
+if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="routers_template.csv"');
+    $output = fopen('php://output', 'w');
+    fputs($output, "\xEF\xBB\xBF");
+    fputcsv($output, ['SSID', 'IP Address', 'MAC Address', 'LAN IP', 'Status', 'Admin User', 'Admin Password', 'Wifi Password', 'Brand', 'Location', 'Remarks']);
+    fputcsv($output, ['JBL-WIFI-2F', '192.168.1.1', '00:1A:2B:3C:4D:5E', '192.168.10.1', 'Online', 'admin', 'Admin@123', 'WifiPass@2026', 'TP-Link Archer AX55', 'Capiz 2F Hallway', 'Main Access Point']);
+    fclose($output);
+    exit;
+}
+
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $stmt = $pdo->query("SELECT * FROM routers ORDER BY id ASC");
     $routers = $stmt->fetchAll();
@@ -360,7 +372,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // Stats
 $total_routers = $pdo->query("SELECT COUNT(*) FROM routers")->fetchColumn();
 $online_routers = $pdo->query("SELECT COUNT(*) FROM routers WHERE status = 'Online'")->fetchColumn();
+$offline_routers = $pdo->query("SELECT COUNT(*) FROM routers WHERE status = 'Offline'")->fetchColumn();
 $warning_routers = $pdo->query("SELECT COUNT(*) FROM routers WHERE status = 'Warning'")->fetchColumn();
+$maint_routers = $pdo->query("SELECT COUNT(*) FROM routers WHERE status = 'Maintenance'")->fetchColumn();
 
 // Filters
 $search_term = $_GET['search'] ?? '';
@@ -544,138 +558,140 @@ require_once '../../includes/sidebar.php';
 ?>
 
 <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark">
-    <header
-        class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+    <!-- Header -->
+    <header class="mb-6 flex flex-col md:flex-row items-start md:items-end justify-between gap-4">
         <div>
-            <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Router Inventory</h2>
-            <p class="text-sm text-slate-500 mt-1">Manage network routers and configurations.</p>
+            <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">Router Inventory</span>
+                <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Router Inventory</h2>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">Manage network routers, access points, and hardware configurations.</p>
         </div>
-        <div class="no-print flex items-center gap-2 md:gap-3 flex-wrap">
-            <a href="?export=csv"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-blue-600 text-white hover:bg-blue-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">download</span> Export CSV
-            </a>
-            <button onclick="toggleModal('importModal')"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-amber-600 text-white hover:bg-amber-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">upload</span> Import CSV
-            </button>
-            <button onclick="printData()"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-slate-600 text-white hover:bg-slate-700 transition-colors text-xs font-bold">
-                <span class="material-symbols-outlined text-[18px] mr-2">print</span> Print
-            </button>
+        <div class="no-print flex items-center gap-2 flex-wrap">
             <button onclick="toggleModal('addRouterModal')"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-primary text-white hover:bg-primary/90 transition-colors text-xs font-bold shadow-lg shadow-primary/20">
-                <span class="material-symbols-outlined text-[18px] mr-2">add</span> Add Router
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3.5 bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[17px]">add</span>
+                <span>Add Router</span>
+            </button>
+            <button onclick="toggleModal('importModal')"
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[17px]">upload_file</span>
+                <span>Import CSV</span>
+            </button>
+            <a href="?export=csv"
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[17px]">download</span>
+                <span>Export CSV</span>
+            </a>
+            <button onclick="printData()"
+                class="flex items-center gap-1.5 rounded-lg h-9 px-3 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all text-xs font-bold shadow-sm">
+                <span class="material-symbols-outlined text-[17px]">print</span>
+                <span>Print</span>
             </button>
         </div>
     </header>
 
+    <!-- Alerts -->
     <?php if ($success_msg): ?>
-        <div
-            class="mb-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">check_circle</span>
-            <?= htmlspecialchars($success_msg) ?>
+        <div class="mb-5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[18px]">check_circle</span>
+                <span><?= htmlspecialchars($success_msg) ?></span>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-emerald-500 hover:text-emerald-400">
+                <span class="material-symbols-outlined text-[16px]">close</span>
+            </button>
         </div>
     <?php endif; ?>
     <?php if ($error_msg): ?>
-        <div
-            class="mb-6 bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">error</span>
-            <?= htmlspecialchars($error_msg) ?>
+        <div class="mb-5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[18px]">error</span>
+                <span><?= htmlspecialchars($error_msg) ?></span>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-400">
+                <span class="material-symbols-outlined text-[16px]">close</span>
+            </button>
         </div>
     <?php endif; ?>
 
-    <!-- Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div
-            class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl text-center">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total Routers</div>
-            <div class="text-2xl font-bold text-slate-900 dark:text-white">
-                <?= number_format($total_routers) ?>
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Total Routers</span>
+                <span class="material-symbols-outlined text-primary text-[18px]">router</span>
             </div>
+            <div class="text-2xl font-bold text-slate-800 dark:text-white mt-1"><?= number_format($total_routers) ?></div>
+            <span class="text-[10px] text-slate-400">Network AP pool</span>
         </div>
-        <div
-            class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl text-center">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Online</div>
-            <div class="text-2xl font-bold text-emerald-500">
-                <?= number_format($online_routers) ?>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Online</span>
+                <span class="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
             </div>
+            <div class="text-2xl font-bold text-emerald-500 mt-1"><?= number_format($online_routers) ?></div>
+            <span class="text-[10px] text-slate-400">Connected & reachable</span>
         </div>
-        <div
-            class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl text-center">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Warnings</div>
-            <div class="text-2xl font-bold <?= $warning_routers > 0 ? 'text-amber-500' : 'text-slate-200' ?>">
-                <?= number_format($warning_routers) ?>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Offline</span>
+                <span class="material-symbols-outlined text-slate-400 text-[18px]">power_off</span>
             </div>
+            <div class="text-2xl font-bold text-slate-600 dark:text-slate-300 mt-1"><?= number_format($offline_routers) ?></div>
+            <span class="text-[10px] text-slate-400">Unreachable units</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Warnings</span>
+                <span class="material-symbols-outlined text-amber-500 text-[18px]">warning</span>
+            </div>
+            <div class="text-2xl font-bold text-amber-500 mt-1"><?= number_format($warning_routers) ?></div>
+            <span class="text-[10px] text-slate-400">Attention required</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm col-span-2 sm:col-span-1">
+            <div class="flex items-center justify-between">
+                <span class="text-slate-500 dark:text-slate-400 text-xs font-medium">Maintenance</span>
+                <span class="material-symbols-outlined text-blue-500 text-[18px]">build</span>
+            </div>
+            <div class="text-2xl font-bold text-blue-500 mt-1"><?= number_format($maint_routers) ?></div>
+            <span class="text-[10px] text-slate-400">Under repair/service</span>
         </div>
     </div>
 
     <!-- Control Bar -->
-    <div class="no-print mb-6 flex gap-3">
-        <form method="GET" class="flex items-center gap-3 flex-wrap w-full">
-            <div class="relative group">
-                <span
-                    class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500">search</span>
-                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>"
-                    placeholder="Search SSID, Brand, IP..."
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 text-xs rounded-xl pl-9 pr-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent w-64">
+    <div class="bg-white dark:bg-[#161d2b] p-3 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm mb-4 no-print">
+        <form method="GET" class="flex flex-wrap items-center gap-2">
+            <div class="relative flex-1 min-w-[220px]">
+                <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
+                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>" placeholder="Search SSID, Brand, IP, MAC, Location..."
+                    class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-800 dark:text-slate-200 focus:outline-none focus:border-primary">
             </div>
-            <input type="hidden" name="status" id="hid_status" value="<?= htmlspecialchars($filter_status) ?>">
-            <input type="hidden" name="location" id="hid_location" value="<?= htmlspecialchars($filter_location) ?>">
-            <?php
-                $r_active_status   = ($filter_status   !== 'All' && $filter_status   !== '') ? $filter_status   : '';
-                $r_active_location = ($filter_location !== 'All' && $filter_location !== '') ? $filter_location : '';
-                $r_active_cat = $r_active_status ? 'status' : ($r_active_location ? 'location' : '');
-                $r_active     = $r_active_status ?: $r_active_location;
-            ?>
-            <select id="r_cat" onchange="rOnCat(this.value)"
-                class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2">
-                <option value="">Filter by...</option>
-                <option value="status"   <?= $r_active_cat==='status'   ? 'selected' : '' ?>>Status</option>
-                <option value="location" <?= $r_active_cat==='location' ? 'selected' : '' ?>>Location</option>
+
+            <!-- Status Filter -->
+            <select name="status" onchange="this.form.submit()"
+                class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="All" <?= $filter_status === 'All' ? 'selected' : '' ?>>All Status</option>
+                <option value="Online" <?= $filter_status === 'Online' ? 'selected' : '' ?>>Online</option>
+                <option value="Offline" <?= $filter_status === 'Offline' ? 'selected' : '' ?>>Offline</option>
+                <option value="Warning" <?= $filter_status === 'Warning' ? 'selected' : '' ?>>Warning</option>
+                <option value="Maintenance" <?= $filter_status === 'Maintenance' ? 'selected' : '' ?>>Maintenance</option>
             </select>
-            <select id="r_val" onchange="rApply(this.value)"
-                class="<?= $r_active?'':'hidden' ?> bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2">
+
+            <!-- Location Filter -->
+            <select name="location" onchange="this.form.submit()"
+                class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary max-w-[180px]">
+                <option value="All" <?= $filter_location === 'All' ? 'selected' : '' ?>>All Locations</option>
+                <?php foreach ($distinct_locations as $loc): ?>
+                    <option value="<?= htmlspecialchars($loc) ?>" <?= $filter_location === $loc ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($loc) ?>
+                    </option>
+                <?php endforeach; ?>
             </select>
-            <?php if ($r_active): ?>
-            <div class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary text-xs font-semibold rounded-xl">
-                <span class="material-symbols-outlined text-[13px]">filter_alt</span>
-                <?= htmlspecialchars($r_active) ?>
-                <a href="?search=<?= urlencode($search_term) ?>&sort=<?= urlencode($sort_by) ?>&limit=<?= urlencode($limit_param) ?>" class="ml-1 text-primary/60 hover:text-red-500" title="Clear">
-                    <span class="material-symbols-outlined text-[14px]">close</span>
-                </a>
-            </div>
-            <?php endif; ?>
-            <script>
-            const _rActiveCat=<?= json_encode($r_active_cat) ?>;
-            const _rActiveVal=<?= json_encode($r_active) ?>;
-            const _rLocations=<?= json_encode(array_values($distinct_locations)) ?>;
-            function rOnCat(c){
-                const v=document.getElementById('r_val');
-                if(!c){v.classList.add('hidden');return;}
-                v.innerHTML='<option value="All">All</option>';
-                const opts = c==='location' ? _rLocations : ['Online','Offline','Warning','Maintenance'];
-                opts.forEach(function(o){
-                    const e=document.createElement('option');e.value=o;e.textContent=o;
-                    if(o===_rActiveVal)e.selected=true;v.appendChild(e);
-                });
-                v.classList.remove('hidden');
-            }
-            function rApply(val){
-                const cat=document.getElementById('r_cat').value;
-                if(cat==='location'){
-                    document.getElementById('hid_location').value=val;
-                    document.getElementById('hid_status').value='All';
-                } else {
-                    document.getElementById('hid_status').value=val;
-                    document.getElementById('hid_location').value='All';
-                }
-                document.getElementById('r_cat').closest('form').submit();
-            }
-            document.addEventListener('DOMContentLoaded',function(){if(_rActiveCat)rOnCat(_rActiveCat);});
-            </script>
+
+            <!-- Sort -->
             <select name="sort" onchange="this.form.submit()"
-                class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
+                class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                 <option value="id_desc" <?= $sort_by === 'id_desc' ? 'selected' : '' ?>>Newest First</option>
                 <option value="ssid_asc" <?= $sort_by === 'ssid_asc' ? 'selected' : '' ?>>SSID (A-Z)</option>
                 <option value="brand_asc" <?= $sort_by === 'brand_asc' ? 'selected' : '' ?>>Brand (A-Z)</option>
@@ -683,35 +699,19 @@ require_once '../../includes/sidebar.php';
                 <option value="status_asc" <?= $sort_by === 'status_asc' ? 'selected' : '' ?>>Status</option>
             </select>
 
-            <!-- Top Pagination -->
-            <div class="flex items-center gap-2 ml-auto">
-                <?php if ($total_pages > 1): ?>
-                    <span class="text-xs text-slate-500 mr-2">Page
-                        <?= $page ?> of
-                        <?= $total_pages ?>
-                    </span>
-                    <div
-                        class="flex h-9 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-xl overflow-hidden mr-2">
-                        <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&location=<?= urlencode($filter_location) ?>&limit=<?= $limit ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-r border-slate-200 dark:border-[#232b3d] <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_left</span>
-                        </a>
-                        <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&status=<?= urlencode($filter_status) ?>&location=<?= urlencode($filter_location) ?>&limit=<?= $limit ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_right</span>
-                        </a>
-                    </div>
-                <?php endif; ?>
-                <select name="limit" onchange="this.form.submit()"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2">
-                    <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                    <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                    <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                    <option value="200" <?= $limit_param == '200' ? 'selected' : '' ?>>Show: 200</option>
-                    <option value="500" <?= $limit_param == '500' ? 'selected' : '' ?>>Show: 500</option>
-                    <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                </select>
-            </div>
+            <!-- Per page -->
+            <select name="limit" onchange="this.form.submit()"
+                class="px-2 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>15</option>
+                <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>50</option>
+                <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>100</option>
+                <option value="all" <?= $limit_param === 'all' ? 'selected' : '' ?>>All</option>
+            </select>
+
+            <button type="submit" class="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-[#232b3d] hover:bg-slate-300 dark:hover:bg-[#2e384e] text-slate-700 dark:text-slate-300 text-xs font-bold transition-all">Filter</button>
+            <?php if ($search_term !== '' || $filter_status !== 'All' || $filter_location !== 'All'): ?>
+                <a href="index.php" class="px-2.5 py-1.5 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 text-xs font-semibold">Clear</a>
+            <?php endif; ?>
         </form>
     </div>
 
@@ -907,25 +907,49 @@ require_once '../../includes/sidebar.php';
 </div>
 
 <!-- Modal: Import -->
+<!-- Import Modal -->
 <div id="importModal" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog">
     <div class="flex items-center justify-center min-h-screen px-4">
-        <div class="fixed inset-0 bg-background-dark/80 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
-        <div
-            class="relative bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl max-w-lg w-full p-4 sm:p-6 shadow-2xl">
-            <h3 class="text-lg font-bold text-slate-900 dark:text-white mb-4">Import Routers from CSV</h3>
-            <p class="text-sm text-slate-400 mb-4">Upload a CSV file with the following columns: SSID, IP Address, MAC
-                Address, LAN IP, Status, Admin User, Admin Password, Wifi Password, Brand, Location, Remarks</p>
-            <form method="POST" enctype="multipart/form-data">
+        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
+        <div class="relative bg-white dark:bg-[#1a2130] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200 dark:border-[#232b3d]">
+            <div class="flex items-center justify-between border-b border-slate-200 dark:border-[#232b3d] pb-3 mb-4">
+                <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span class="material-symbols-outlined text-amber-600">upload_file</span> Import Routers from CSV
+                </h3>
+                <button type="button" onclick="toggleModal('importModal')" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+
+            <form method="POST" enctype="multipart/form-data" class="space-y-4">
                 <?= getCsrfInput() ?>
                 <input type="hidden" name="action" value="import_csv">
-                <div class="mb-4">
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select CSV File</label>
                     <input type="file" name="csv_file" accept=".csv" required
-                        class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-white rounded-xl px-4 py-2.5 text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-slate-900 dark:text-white hover:file:bg-primary/90">
+                        class="w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500/10 file:text-amber-600 hover:file:bg-amber-500/20 file:cursor-pointer border border-slate-200 dark:border-[#232b3d] rounded-xl p-2 bg-slate-50 dark:bg-[#101622]">
                 </div>
-                <div class="flex justify-end gap-3">
-                    <button type="button" onclick="toggleModal('importModal')"
-                        class="px-4 py-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">Cancel</button>
-                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl">Import</button>
+
+                <div class="p-3 bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl text-xs space-y-1 text-slate-600 dark:text-slate-400">
+                    <p class="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-[16px] text-amber-500">info</span> Supported Formats:
+                    </p>
+                    <p>&bull; Standard Routers CSV format (11 columns matching system export).</p>
+                    <p>&bull; Columns: SSID, IP Address, MAC Address, LAN IP, Status, Admin User, Admin Password, Wifi Password, Brand, Location, Remarks.</p>
+                    <p>&bull; Existing router records are automatically updated.</p>
+                    <div class="pt-2">
+                        <a href="?download_template=csv" class="inline-flex items-center gap-1 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
+                            <span class="material-symbols-outlined text-[14px]">download</span> Download CSV Template
+                        </a>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-[#232b3d]">
+                    <button type="button" onclick="toggleModal('importModal')" class="px-5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-[#232b3d] transition-colors">Cancel</button>
+                    <button type="submit" class="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 flex items-center gap-1.5 shadow-sm transition-colors">
+                        <span class="material-symbols-outlined text-[16px]">upload</span> Upload &amp; Import
+                    </button>
                 </div>
             </form>
         </div>

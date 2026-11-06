@@ -88,14 +88,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars(ucfirst($mode)) ?> - <?= APP_NAME ?></title>
     <link rel="icon" type="image/svg+xml" href="<?= BASE_URL ?>/assets/favicon.svg">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
-        rel="stylesheet">
+    <!-- Tailwind CSS (Offline / Local Intranet) -->
+    <script src="<?= BASE_URL ?>/assets/js/tailwind.js"></script>
+
+    <!-- Local Fonts (Inter & Material Symbols Outlined) -->
+    <link rel="stylesheet" href="<?= BASE_URL ?>/assets/css/fonts.css">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -251,8 +248,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php endif; ?>
         </div>
 
-        <p class="text-center text-xs text-slate-600 mt-8">
-            &copy; <?= date('Y') ?> IHOMS-MIKE. All rights reserved. <?= $pdo ? getAppVersion($pdo) : 'v—' ?>
+        <p class="text-center text-xs text-slate-500 mt-8 flex items-center justify-center gap-2">
+            <span>&copy; <?= date('Y') ?> IHOMS-MIKE. All rights reserved.</span>
+            <span class="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-slate-100 dark:bg-[#1a2130] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-[#232b3d]">
+                <?= $pdo ? getAppVersion($pdo) : 'v1.15.2' ?>
+            </span>
         </p>
     </div>
 

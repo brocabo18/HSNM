@@ -155,10 +155,13 @@ try {
 
 // Stats
 try {
-    $total_links = $pdo->query("SELECT COUNT(*) FROM ihoms_links")->fetchColumn();
-    $active_links = $pdo->query("SELECT COUNT(*) FROM ihoms_links WHERE status = 'Active'")->fetchColumn();
+    $total_links = (int)($pdo->query("SELECT COUNT(*) FROM ihoms_links")->fetchColumn() ?: 0);
+    $active_links = (int)($pdo->query("SELECT COUNT(*) FROM ihoms_links WHERE status = 'Active'")->fetchColumn() ?: 0);
+    $inactive_links = (int)($pdo->query("SELECT COUNT(*) FROM ihoms_links WHERE status != 'Active'")->fetchColumn() ?: 0);
+    $total_categories = count($categories);
+    $showing_links = count($links);
 } catch (Exception $e) {
-    $total_links = $active_links = 0;
+    $total_links = $active_links = $inactive_links = $total_categories = $showing_links = 0;
 }
 
 $page_title = "IS Links";
@@ -167,79 +170,101 @@ require_once '../../includes/sidebar.php';
 ?>
 
 <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark">
-    <header
-        class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+    <header class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-4 mb-6 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
         <div>
+            <div class="flex items-center gap-2 mb-1">
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-primary/10 text-primary border border-primary/20">Information Systems</span>
+            </div>
             <h2 class="text-2xl font-bold text-slate-900 dark:text-white">IS Links</h2>
-            <p class="text-sm text-slate-500 mt-1">IHOMS Information System URLs & Links</p>
+            <p class="text-xs text-slate-400 mt-0.5">IHOMS Information System URLs &amp; Quick Access Directory</p>
         </div>
-        <div class="flex items-center gap-2 md:gap-3 flex-wrap">
-            <!-- View Toggle -->
-            <div
-                class="flex h-9 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-xl overflow-hidden">
+        <div class="no-print flex items-center gap-2 flex-wrap">
+            <div class="flex h-9 bg-white dark:bg-[#161d2b] border border-slate-200 dark:border-[#232b3d] rounded-lg overflow-hidden shadow-sm">
                 <a href="?view=card&search=<?= urlencode($search_term) ?>&category=<?= urlencode($filter_category) ?>&status=<?= urlencode($filter_status) ?>"
-                    class="px-3 flex items-center gap-1.5 text-xs font-bold transition-colors <?= $view_mode === 'card' ? 'bg-primary text-white' : 'text-slate-400 hover:text-slate-900 dark:hover:text-white' ?>">
+                    class="px-3 flex items-center gap-1.5 text-xs font-bold transition-colors <?= $view_mode === 'card' ? 'bg-primary text-white' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white' ?>">
                     <span class="material-symbols-outlined text-[16px]">grid_view</span> Cards
                 </a>
                 <a href="?view=table&search=<?= urlencode($search_term) ?>&category=<?= urlencode($filter_category) ?>&status=<?= urlencode($filter_status) ?>"
-                    class="px-3 flex items-center gap-1.5 text-xs font-bold transition-colors <?= $view_mode === 'table' ? 'bg-primary text-white' : 'text-slate-400 hover:text-slate-900 dark:hover:text-white' ?> border-l border-slate-200 dark:border-[#232b3d]">
+                    class="px-3 flex items-center gap-1.5 text-xs font-bold transition-colors <?= $view_mode === 'table' ? 'bg-primary text-white' : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white' ?> border-l border-slate-200 dark:border-[#232b3d]">
                     <span class="material-symbols-outlined text-[16px]">table_rows</span> Table
                 </a>
             </div>
-            <button onclick="toggleModal('addLinkModal')"
-                class="flex items-center justify-center rounded-lg h-9 px-4 bg-primary text-white hover:bg-primary/90 transition-colors text-xs font-bold shadow-lg shadow-primary/20">
-                <span class="material-symbols-outlined text-[18px] mr-2">add</span> Add IS Link
+            <button onclick="toggleModal('addLinkModal')" class="flex items-center gap-1.5 px-3.5 h-9 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-sm">
+                <span class="material-symbols-outlined text-[16px]">add</span> Add IS Link
             </button>
         </div>
     </header>
 
     <?php if ($success_msg): ?>
-        <div
-            class="mb-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">check_circle</span>
-            <?= htmlspecialchars($success_msg) ?>
+        <div class="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center justify-between no-print">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">check_circle</span>
+                <?= htmlspecialchars($success_msg) ?>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-emerald-500/60 hover:text-emerald-500"><span class="material-symbols-outlined text-sm">close</span></button>
         </div>
     <?php endif; ?>
     <?php if ($error_msg): ?>
-        <div
-            class="mb-6 bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-            <span class="material-symbols-outlined">error</span>
-            <?= htmlspecialchars($error_msg) ?>
+        <div class="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center justify-between no-print">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">error</span>
+                <?= htmlspecialchars($error_msg) ?>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-red-500/60 hover:text-red-500"><span class="material-symbols-outlined text-sm">close</span></button>
         </div>
     <?php endif; ?>
 
-    <!-- Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total Links</div>
-            <div class="text-2xl font-bold text-slate-900 dark:text-white">
-                <?= number_format($total_links) ?>
+    <!-- Stats Cards Grid -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6 no-print">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Systems</span>
+                <span class="material-symbols-outlined text-primary text-base">link</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-slate-900 dark:text-white"><?= number_format($total_links) ?></p>
+            <span class="text-[10px] text-slate-400">Registered links</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Active</div>
-            <div class="text-2xl font-bold text-emerald-500">
-                <?= number_format($active_links) ?>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Active</span>
+                <span class="material-symbols-outlined text-emerald-500 text-base">check_circle</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-emerald-500"><?= number_format($active_links) ?></p>
+            <span class="text-[10px] text-slate-400">Online &amp; accessible</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
-            <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Categories</div>
-            <div class="text-2xl font-bold text-slate-700 dark:text-slate-200">
-                <?= number_format(count($categories)) ?>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Inactive</span>
+                <span class="material-symbols-outlined text-amber-500 text-base">link_off</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-amber-500"><?= number_format($inactive_links) ?></p>
+            <span class="text-[10px] text-slate-400">Offline / decommissioned</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Categories</span>
+                <span class="material-symbols-outlined text-purple-500 text-base">folder</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-purple-400"><?= number_format($total_categories) ?></p>
+            <span class="text-[10px] text-slate-400">System modules</span>
+        </div>
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+            <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Showing</span>
+                <span class="material-symbols-outlined text-blue-500 text-base">filter_list</span>
+            </div>
+            <p class="text-2xl font-bold mt-1 text-blue-400"><?= number_format($showing_links) ?></p>
+            <span class="text-[10px] text-slate-400">Current view count</span>
         </div>
     </div>
 
-    <!-- Control Bar -->
-    <div class="mb-6 flex gap-3">
-        <form method="GET" class="flex items-center gap-3 flex-wrap w-full">
+    <!-- Filter / Control Bar -->
+    <div class="bg-white dark:bg-[#161d2b] p-3 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm mb-4 no-print">
+        <form method="GET" class="flex flex-wrap items-center gap-2">
             <input type="hidden" name="view" value="<?= htmlspecialchars($view_mode) ?>">
-            <div class="relative group">
-                <span
-                    class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500">search</span>
-                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>"
-                    placeholder="Search system name, URL, category..."
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 text-xs rounded-xl pl-9 pr-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent w-72">
+            <div class="relative flex-1 min-w-[200px]">
+                <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>" placeholder="Search system name, URL, category..." class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-primary">
             </div>
 
             <input type="hidden" name="category" id="hid_category" value="<?= htmlspecialchars($filter_category) ?>">
@@ -249,23 +274,29 @@ require_once '../../includes/sidebar.php';
             if($filter_category!=='All'&&$filter_category!==''){$il_ac='category'; $il_av=$filter_category;}
             elseif($filter_status!=='All'&&$filter_status!=='') {$il_ac='il_status';$il_av=$filter_status;}
             ?>
-            <select id="il_cat" onchange="ilOnCat(this.value)"
-                class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
+            <select id="il_cat" onchange="ilOnCat(this.value)" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                 <option value="">Filter by...</option>
                 <option value="category"  <?= $il_ac==='category' ?'selected':'' ?>>Category</option>
                 <option value="il_status" <?= $il_ac==='il_status'?'selected':'' ?>>Status</option>
             </select>
-            <select id="il_val" onchange="ilApply(this.value)"
-                class="<?= $il_ac?'':'hidden' ?> bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
+            <select id="il_val" onchange="ilApply(this.value)" class="<?= $il_ac?'':'hidden' ?> px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
             </select>
             <?php if($il_ac): ?>
-            <div class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary text-xs font-semibold rounded-xl">
+            <div class="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary text-xs font-semibold rounded-lg">
                 <span class="material-symbols-outlined text-[13px]">filter_alt</span>
                 <?= htmlspecialchars($il_av) ?>
                 <a href="?search=<?= urlencode($search_term) ?>&view=<?= urlencode($view_mode) ?>" class="ml-1 text-primary/60 hover:text-red-500" title="Clear">
                     <span class="material-symbols-outlined text-[14px]">close</span>
                 </a>
             </div>
+            <?php endif; ?>
+            <button type="submit" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white transition-all shadow-sm">
+                Filter
+            </button>
+            <?php if ($search_term || $filter_category !== 'All' || $filter_status !== 'All'): ?>
+                <a href="index.php?view=<?= urlencode($view_mode) ?>" class="px-2.5 py-1.5 text-xs font-medium text-red-500 hover:text-red-600 transition-colors">
+                    Clear
+                </a>
             <?php endif; ?>
             <script>
             const _ilO={category:<?= json_encode(array_values($categories)) ?>,il_status:['Active','Inactive']};

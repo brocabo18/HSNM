@@ -6,7 +6,9 @@
 require_once __DIR__ . '/config.php';
 
 // Security: limit to local development IPs or logged in admin
-$allowed = in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1', '192.163.10.11']);
+// LOCAL_HOST_IP is set in the server environment — never hardcoded in source
+$_local_ip = getenv('LOCAL_HOST_IP') ?: '';
+$allowed = in_array($_SERVER['REMOTE_ADDR'] ?? '', array_filter(['127.0.0.1', '::1', $_local_ip]));
 // We can also allow logged in admin:
 // if (!isset($_SESSION['user_id']) && !$allowed) { die("Access Denied"); }
 

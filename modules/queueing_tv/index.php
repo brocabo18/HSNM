@@ -3,6 +3,18 @@ require_once '../../config.php';
 requireLogin();
 
 // --- Export CSV ---
+// --- CSV Template Download ---
+if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="queueing_tv_template.csv"');
+    $output = fopen('php://output', 'w');
+    fputs($output, "\xEF\xBB\xBF");
+    fputcsv($output, ['Location', 'Department', 'Remote Status', 'Remote Link', 'Queuing Link', 'IP Address', 'Anydesk ID', 'TeamViewer ID', 'RustDesk ID', 'Password', 'Remarks']);
+    fputcsv($output, ['Capiz 2F Waiting Area', 'OPD', 'Online', 'http://192.168.1.100:8080', 'http://queue.hospital.gov.ph', '192.168.1.100', '123456789', '987654321', '555666777', 'tvpass123', 'Samsung 55" Smart TV']);
+    fclose($output);
+    exit;
+}
+
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $stmt = $pdo->query("SELECT * FROM queueing_tvs ORDER BY id ASC");
     $items = $stmt->fetchAll();
@@ -152,6 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 // Data fetching for UI table
 $search = $_GET['search'] ?? '';
+$status = $_GET['status'] ?? '';
 $where = "1=1";
 $params = [];
 if ($search) {
@@ -159,13 +172,27 @@ if ($search) {
     $s = "%$search%";
     $params = [$s, $s, $s, $s, $s];
 }
+if ($status) {
+    $where .= " AND LOWER(remote_status) = LOWER(?)";
+    $params[] = $status;
+}
 
-$query = "SELECT * FROM queueing_tvs WHERE $where ORDER BY id DESC";
+$sort = $_GET['sort'] ?? 'id_desc';
+$orderBy = "id DESC";
+if ($sort === 'id_asc') $orderBy = "id ASC";
+elseif ($sort === 'location') $orderBy = "location ASC";
+elseif ($sort === 'dept') $orderBy = "department ASC";
+
+$query = "SELECT * FROM queueing_tvs WHERE $where ORDER BY $orderBy";
 $stmt = $pdo->prepare($query);
 $stmt->execute($params);
 $qtvs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$total_tvs = $pdo->query("SELECT COUNT(*) FROM queueing_tvs")->fetchColumn();
+$total_tvs = (int)($pdo->query("SELECT COUNT(*) FROM queueing_tvs")->fetchColumn() ?: 0);
+$active_remote = (int)($pdo->query("SELECT COUNT(*) FROM queueing_tvs WHERE LOWER(remote_status) = 'yes'")->fetchColumn() ?: 0);
+$no_remote = (int)($pdo->query("SELECT COUNT(*) FROM queueing_tvs WHERE LOWER(remote_status) != 'yes' OR remote_status IS NULL")->fetchColumn() ?: 0);
+$locations_count = (int)($pdo->query("SELECT COUNT(DISTINCT location) FROM queueing_tvs WHERE location IS NOT NULL AND location != ''")->fetchColumn() ?: 0);
+$with_ip_count = (int)($pdo->query("SELECT COUNT(*) FROM queueing_tvs WHERE ip_address IS NOT NULL AND ip_address != ''")->fetchColumn() ?: 0);
 ?>
 <?php require_once '../../includes/header.php'; ?>
 
@@ -200,63 +227,122 @@ $total_tvs = $pdo->query("SELECT COUNT(*) FROM queueing_tvs")->fetchColumn();
     <?php require_once '../../includes/sidebar.php'; ?>
     
     <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark print:p-0 print:overflow-visible">
-        <header class="no-print -mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+        <!-- Page Header -->
+        <div class="mb-6 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 no-print">
             <div>
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">Display Systems</span>
+                </div>
                 <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Queueing TV Inventory</h2>
-                <p class="text-sm text-slate-500 mt-1">Manage queuing display systems and their remote access details.</p>
+                <p class="text-xs text-slate-400 mt-0.5">Manage queuing display systems and their remote access details.</p>
             </div>
-            <div class="flex items-center gap-2 md:gap-3 flex-wrap">
-                <a href="?export=csv" class="flex items-center justify-center rounded-lg h-[36px] px-4 bg-blue-600 text-white hover:bg-blue-700 transition-colors text-xs font-bold no-print shadow-lg shadow-blue-600/20">
-                    <span class="material-symbols-outlined text-[18px] mr-2">download</span> Export CSV
+            <div class="flex items-center gap-2 flex-wrap">
+                <button onclick="toggleModal('addModal')" class="flex items-center gap-1.5 px-3.5 h-9 rounded-lg bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[16px]">add</span> Add Queueing TV
+                </button>
+                <button onclick="toggleModal('importModal')" class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[16px]">upload_file</span> Import CSV
+                </button>
+                <a href="?export=csv" class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[16px]">download</span> Export CSV
                 </a>
-                <button onclick="toggleModal('importModal')" class="flex items-center justify-center rounded-lg h-[36px] px-4 bg-amber-600 text-white hover:bg-amber-700 transition-colors text-xs font-bold no-print shadow-lg shadow-amber-600/20">
-                    <span class="material-symbols-outlined text-[18px] mr-2">upload</span> Import CSV
-                </button>
-                <button onclick="printData()" class="flex items-center justify-center rounded-lg h-[36px] px-4 bg-slate-600 dark:bg-slate-700 text-white hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors text-xs font-bold no-print shadow-lg shadow-slate-600/20">
-                    <span class="material-symbols-outlined text-[18px] mr-2">print</span> Print
-                </button>
-                <button onclick="toggleModal('addModal')" class="flex items-center justify-center rounded-lg h-[36px] px-4 bg-primary text-white hover:bg-primary/90 transition-colors text-xs font-bold shadow-lg shadow-primary/20 no-print">
-                    <span class="material-symbols-outlined text-[18px] mr-2">add</span> Add Queueing TV
+                <button onclick="printData()" class="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#232b3d] text-xs font-bold transition-all shadow-sm">
+                    <span class="material-symbols-outlined text-[16px]">print</span> Print
                 </button>
             </div>
-        </header>
+        </div>
 
-        <div class="no-print">
-            <?php if ($success_msg): ?>
-                <div class="mb-6 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-                    <span class="material-symbols-outlined">check_circle</span> <?= htmlspecialchars($success_msg) ?>
+        <!-- Notification Alerts -->
+        <?php if ($success_msg): ?>
+            <div class="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold flex items-center justify-between no-print">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">check_circle</span>
+                    <?= htmlspecialchars($success_msg) ?>
                 </div>
-            <?php endif; ?>
-            <?php if ($error_msg): ?>
-                <div class="mb-6 bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl text-sm font-medium flex items-center gap-3">
-                    <span class="material-symbols-outlined">error</span> <?= htmlspecialchars($error_msg) ?>
-                </div>
-            <?php endif; ?>
-
-            <!-- Stats -->
-            <div class="grid grid-cols-1 mb-8">
-                <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl w-64">
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total Queueing TVs</div>
-                    <div class="text-2xl font-bold text-slate-900 dark:text-white"><?= number_format($total_tvs) ?></div>
-                </div>
+                <button onclick="this.parentElement.remove()" class="text-emerald-500/60 hover:text-emerald-500"><span class="material-symbols-outlined text-sm">close</span></button>
             </div>
-
-            <!-- Controls -->
-            <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-2xl mb-6 p-4">
-                <form method="GET" class="flex flex-wrap gap-4 items-end">
-                    <div class="flex-1 min-w-[200px]">
-                        <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">Search</label>
-                        <div class="relative">
-                            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
-                            <input type="text" name="search" value="<?= htmlspecialchars($search) ?>" placeholder="Search IP, AnyDesk, Location..." class="w-full bg-slate-50 dark:bg-background-dark border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white text-sm rounded-xl pl-10 pr-4 py-2 focus:ring-2 focus:ring-primary focus:border-primary transition-all">
-                        </div>
-                    </div>
-                    <button type="submit" class="h-[42px] px-6 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors">Search</button>
-                    <?php if($search): ?>
-                        <a href="index.php" class="h-[42px] px-6 bg-slate-100 dark:bg-[#232b3d] text-slate-600 dark:text-slate-300 rounded-xl text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center">Clear</a>
-                    <?php endif; ?>
-                </form>
+        <?php endif; ?>
+        <?php if ($error_msg): ?>
+            <div class="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold flex items-center justify-between no-print">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">error</span>
+                    <?= htmlspecialchars($error_msg) ?>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-red-500/60 hover:text-red-500"><span class="material-symbols-outlined text-sm">close</span></button>
             </div>
+        <?php endif; ?>
+
+        <!-- Stats Cards Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6 no-print">
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total TVs</span>
+                    <span class="material-symbols-outlined text-primary text-base">tv</span>
+                </div>
+                <p class="text-2xl font-bold mt-1 text-slate-900 dark:text-white"><?= number_format($total_tvs) ?></p>
+                <span class="text-[10px] text-slate-400">Total queuing displays</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Online Remote</span>
+                    <span class="material-symbols-outlined text-emerald-500 text-base">check_circle</span>
+                </div>
+                <p class="text-2xl font-bold mt-1 text-emerald-500"><?= number_format($active_remote) ?></p>
+                <span class="text-[10px] text-slate-400">Accessible remotely</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Offline / Local</span>
+                    <span class="material-symbols-outlined text-slate-400 text-base">desktop_access_disabled</span>
+                </div>
+                <p class="text-2xl font-bold mt-1 text-slate-700 dark:text-slate-300"><?= number_format($no_remote) ?></p>
+                <span class="text-[10px] text-slate-400">Local control only</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Locations</span>
+                    <span class="material-symbols-outlined text-purple-500 text-base">location_on</span>
+                </div>
+                <p class="text-2xl font-bold mt-1 text-purple-400"><?= number_format($locations_count) ?></p>
+                <span class="text-[10px] text-slate-400">Active areas</span>
+            </div>
+            <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">IP Configured</span>
+                    <span class="material-symbols-outlined text-blue-500 text-base">lan</span>
+                </div>
+                <p class="text-2xl font-bold mt-1 text-blue-400"><?= number_format($with_ip_count) ?></p>
+                <span class="text-[10px] text-slate-400">Network mapped</span>
+            </div>
+        </div>
+
+        <!-- Filter / Control Bar -->
+        <div class="bg-white dark:bg-[#161d2b] p-3 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm mb-4 no-print">
+            <form method="GET" class="flex flex-wrap items-center gap-2">
+                <div class="relative flex-1 min-w-[200px]">
+                    <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+                    <input type="text" name="search" value="<?= htmlspecialchars($search) ?>" placeholder="Search IP, AnyDesk, Location, Department..." class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-primary">
+                </div>
+                <select name="status" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                    <option value="">All Status</option>
+                    <option value="Yes" <?= ($status === 'Yes') ? 'selected' : '' ?>>Remote: Yes</option>
+                    <option value="No" <?= ($status === 'No') ? 'selected' : '' ?>>Remote: No</option>
+                </select>
+                <select name="sort" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                    <option value="id_desc" <?= ($sort === 'id_desc') ? 'selected' : '' ?>>ID (Desc)</option>
+                    <option value="id_asc" <?= ($sort === 'id_asc') ? 'selected' : '' ?>>ID (Asc)</option>
+                    <option value="location" <?= ($sort === 'location') ? 'selected' : '' ?>>Location</option>
+                    <option value="dept" <?= ($sort === 'dept') ? 'selected' : '' ?>>Department</option>
+                </select>
+                <button type="submit" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white transition-all shadow-sm">
+                    Filter
+                </button>
+                <?php if ($search || $status || $sort !== 'id_desc'): ?>
+                    <a href="index.php" class="px-2.5 py-1.5 text-xs font-medium text-red-500 hover:text-red-600 transition-colors">
+                        Clear
+                    </a>
+                <?php endif; ?>
+            </form>
         </div>
 
         <!-- Table -->
@@ -490,24 +576,46 @@ $total_tvs = $pdo->query("SELECT COUNT(*) FROM queueing_tvs")->fetchColumn();
 </div>
 
 <!-- Import Modal -->
-<div id="importModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center no-print">
-    <div class="bg-white dark:bg-[#1a2130] w-full max-w-md p-6 rounded-2xl shadow-xl">
-        <div class="flex items-center justify-between mb-6 pb-4 border-b border-slate-200 dark:border-[#232b3d]">
-            <h3 class="text-xl font-bold text-slate-900 dark:text-white">Import from CSV</h3>
-            <button onclick="toggleModal('importModal')" class="text-slate-400 hover:text-red-500 transition-colors"><span class="material-symbols-outlined rounded-full p-1 hover:bg-red-50 dark:hover:bg-red-500/10">close</span></button>
+<div id="importModal" class="fixed inset-0 bg-black/60 z-50 hidden items-center justify-center p-4 no-print" onclick="if(event.target===this)toggleModal('importModal')">
+    <div class="bg-white dark:bg-[#1a2130] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200 dark:border-[#232b3d]">
+        <div class="flex items-center justify-between border-b border-slate-200 dark:border-[#232b3d] pb-3 mb-4">
+            <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span class="material-symbols-outlined text-amber-600">upload_file</span> Import Queueing TVs from CSV
+            </h3>
+            <button type="button" onclick="toggleModal('importModal')" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
+                <span class="material-symbols-outlined">close</span>
+            </button>
         </div>
-        <form method="POST" enctype="multipart/form-data">
+
+        <form method="POST" enctype="multipart/form-data" class="space-y-4">
             <input type="hidden" name="csrf_token" value="<?= generateCsrfToken() ?>">
             <input type="hidden" name="action" value="import_csv">
-            <div class="mb-6">
-                <label class="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">Upload CSV File</label>
-                <input type="file" name="csv_file" accept=".csv" required class="block w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100 dark:file:bg-amber-900/30 dark:file:text-amber-400 dark:hover:file:bg-amber-900/50 transition-all cursor-pointer bg-slate-50 dark:bg-background-dark border border-slate-200 dark:border-[#232b3d] rounded-xl">
-                <p class="text-xs text-slate-400 mt-2">1. Export the template first to see the column layout.</p>
-                <p class="text-xs text-slate-400 mt-1">2. Fill data strictly following the header. Do not edit column headers.</p>
+
+            <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select CSV File</label>
+                <input type="file" name="csv_file" accept=".csv" required
+                    class="w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500/10 file:text-amber-600 hover:file:bg-amber-500/20 file:cursor-pointer border border-slate-200 dark:border-[#232b3d] rounded-xl p-2 bg-slate-50 dark:bg-[#101622]">
             </div>
-            <div class="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-[#232b3d]">
-                <button type="button" onclick="toggleModal('importModal')" class="px-5 py-2.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 dark:bg-[#232b3d] dark:text-slate-300 dark:hover:bg-slate-700 transition-colors rounded-xl mx-auto w-full">Cancel</button>
-                <button type="submit" class="px-5 py-2.5 text-sm font-bold bg-amber-600 text-white hover:bg-amber-700 transition-colors shadow-lg shadow-amber-600/30 rounded-xl w-full">Upload & Import</button>
+
+            <div class="p-3 bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl text-xs space-y-1 text-slate-600 dark:text-slate-400">
+                <p class="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <span class="material-symbols-outlined text-[16px] text-amber-500">info</span> Supported Formats:
+                </p>
+                <p>&bull; Standard Queueing TV CSV format (11 columns matching system export).</p>
+                <p>&bull; Columns: Location, Department, Remote Status, Remote Link, Queuing Link, IP, Anydesk, etc.</p>
+                <p>&bull; Follow header layout strictly without modifying column names.</p>
+                <div class="pt-2">
+                    <a href="?download_template=csv" class="inline-flex items-center gap-1 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
+                        <span class="material-symbols-outlined text-[14px]">download</span> Download CSV Template
+                    </a>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-[#232b3d]">
+                <button type="button" onclick="toggleModal('importModal')" class="px-5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-[#232b3d] transition-colors">Cancel</button>
+                <button type="submit" class="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 flex items-center gap-1.5 shadow-sm transition-colors">
+                    <span class="material-symbols-outlined text-[16px]">upload</span> Upload &amp; Import
+                </button>
             </div>
         </form>
     </div>

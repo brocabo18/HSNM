@@ -19,72 +19,159 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     
     // --- ACTIONS FOR DATA MISMATCH VIEW ---
     if ($view === 'mismatch') {
-        $control_number = $_POST['control_number'] ?? '';
+        $control_number = trim($_POST['control_number'] ?? '');
         if ($control_number) {
             if ($_POST['action'] === 'retain_ip') {
-                // "Retain IP Inventory" -> Update Computer Inventory
+                // "Use IP Data": Update Computer Inventory (and Asset) with the IP & MAC from IP Inventory
                 try {
-                    $stmt = $pdo->prepare("SELECT ip_address, mac_address FROM ips WHERE control_number = ? LIMIT 1");
+                    $stmt = $pdo->prepare("SELECT id, ip_address, mac_address FROM ips WHERE control_number = ? ORDER BY id ASC LIMIT 1");
                     $stmt->execute([$control_number]);
-                    $ip_data = $stmt->fetch();
+                    $ip_data = $stmt->fetch(PDO::FETCH_ASSOC);
 
-                    if ($ip_data) {
-                        $update = $pdo->prepare("UPDATE computers SET ip_address = ?, mac_address = ? WHERE control_number = ?");
-                        $update->execute([$ip_data['ip_address'], $ip_data['mac_address'], $control_number]);
-                        
-                        logAudit($pdo, 'reconcile_update', "Synced Computer Inventory to match IP Inventory for $control_number", 'reconciliation', null);
-                        $success_msg = "Computer Inventory updated successfully for $control_number.";
+                    if ($ip_data && !empty($ip_data['ip_address'])) {
+                        $target_ip = trim($ip_data['ip_address']);
+                        $target_mac = trim($ip_data['mac_address'] ?? '');
+
+                        // 1. Update Computer Inventory
+                        $update_comp = $pdo->prepare("UPDATE computers SET ip_address = ?, mac_address = CASE WHEN ? != '' THEN ? ELSE mac_address END WHERE control_number = ?");
+                        $update_comp->execute([$target_ip, $target_mac, $target_mac, $control_number]);
+
+                        // 2. Fetch computer id & details to sync asset & IP metadata
+                        $comp_stmt = $pdo->prepare("SELECT id, end_user, department FROM computers WHERE control_number = ? LIMIT 1");
+                        $comp_stmt->execute([$control_number]);
+                        $comp_row = $comp_stmt->fetch(PDO::FETCH_ASSOC);
+                        if ($comp_row) {
+                            syncComputerToAsset($pdo, $comp_row['id']);
+
+                            // 3. Ensure the IP row in ips has status='active', device_type='Workstation', and matching details
+                            $update_ip = $pdo->prepare("
+                                UPDATE ips 
+                                SET status = 'active',
+                                    device_type = 'Workstation',
+                                    om_name = COALESCE(NULLIF(om_name, ''), ?),
+                                    department = COALESCE(NULLIF(department, ''), ?),
+                                    last_seen = NOW()
+                                WHERE id = ?
+                            ");
+                            $update_ip->execute([$comp_row['end_user'], $comp_row['department'], $ip_data['id']]);
+                        }
+
+                        // 4. If any other IP row was also holding this control_number, release it
+                        $rel_stmt = $pdo->prepare("
+                            UPDATE ips 
+                            SET status = 'available',
+                                device_type = 'Other',
+                                mac_address = NULL,
+                                hostname = NULL,
+                                control_number = NULL,
+                                location = NULL,
+                                om_name = NULL,
+                                department = NULL,
+                                description = NULL,
+                                remarks = NULL,
+                                last_seen = NOW()
+                            WHERE control_number = ? AND id != ?
+                        ");
+                        $rel_stmt->execute([$control_number, $ip_data['id']]);
+
+                        logAudit($pdo, 'reconcile_update', "Synced Computer Inventory to match IP Inventory ($target_ip) for $control_number", 'reconciliation', null);
+                        $success_msg = "Computer Inventory updated successfully with IP Data ($target_ip) for $control_number.";
                     } else {
-                        $error_msg = "Source data missing in IP Inventory.";
+                        $error_msg = "Source IP address missing in IP Inventory for $control_number.";
                     }
                 } catch (Exception $e) {
                     $error_msg = "Error updating Computer Inventory: " . $e->getMessage();
                 }
             } elseif ($_POST['action'] === 'retain_computer') {
-                // "Retain Computer Inventory" -> Update IP Inventory
+                // "Use Comp Data": Copy Computer Data onto the EXISTING IP address in IP Inventory
                 try {
-                    $stmt = $pdo->prepare("SELECT ip_address, mac_address FROM computers WHERE control_number = ? LIMIT 1");
+                    $stmt = $pdo->prepare("SELECT id, ip_address, mac_address, end_user, department FROM computers WHERE control_number = ? LIMIT 1");
                     $stmt->execute([$control_number]);
-                    $comp_data = $stmt->fetch();
+                    $comp_data = $stmt->fetch(PDO::FETCH_ASSOC);
 
                     if ($comp_data) {
-                        // Get the exact ips row (id + current ip) that belongs to this control_number
-                        $own_row = $pdo->prepare("SELECT id, ip_address FROM ips WHERE control_number = ? LIMIT 1");
-                        $own_row->execute([$control_number]);
-                        $own_record = $own_row->fetch();
-                        $own_id  = $own_record ? (int)$own_record['id'] : 0;
+                        $target_ip = trim($comp_data['ip_address'] ?? '');
+                        $target_mac = strtoupper(str_replace(':', '-', trim($comp_data['mac_address'] ?? '')));
+                        $target_user = trim($comp_data['end_user'] ?? '');
+                        $target_dept = trim($comp_data['department'] ?? '');
 
-                        if (!$own_id) {
-                            $error_msg = "No matching IP Inventory row found for control number $control_number.";
+                        // If target IP is a valid IP address:
+                        if (!empty($target_ip) && filter_var($target_ip, FILTER_VALIDATE_IP)) {
+                            // Find the existing row in `ips` for this IP address (DO NOT change ip_address or create new lines!)
+                            $find_ip = $pdo->prepare("SELECT id FROM ips WHERE ip_address = ? LIMIT 1");
+                            $find_ip->execute([$target_ip]);
+                            $target_ip_row = $find_ip->fetch(PDO::FETCH_ASSOC);
+
+                            if ($target_ip_row) {
+                                $target_ip_id = $target_ip_row['id'];
+
+                                // 1. Copy data ONTO THE EXISTING IP ADDRESS row
+                                $update_ip = $pdo->prepare("
+                                    UPDATE ips 
+                                    SET control_number = :ctrl,
+                                        mac_address = CASE WHEN :mac != '' THEN :mac ELSE mac_address END,
+                                        om_name = :om,
+                                        department = :dept,
+                                        status = 'active',
+                                        device_type = 'Workstation',
+                                        last_seen = NOW()
+                                    WHERE id = :id
+                                ");
+                                $update_ip->execute([
+                                    ':ctrl' => $control_number,
+                                    ':mac'  => $target_mac,
+                                    ':om'   => $target_user,
+                                    ':dept' => $target_dept,
+                                    ':id'   => $target_ip_id,
+                                ]);
+
+                                // 2. Release any previous IP row(s) assigned to this control_number
+                                $rel_stmt = $pdo->prepare("
+                                    UPDATE ips 
+                                    SET status = 'available',
+                                        device_type = 'Other',
+                                        mac_address = NULL,
+                                        hostname = NULL,
+                                        control_number = NULL,
+                                        location = NULL,
+                                        om_name = NULL,
+                                        department = NULL,
+                                        description = NULL,
+                                        remarks = NULL,
+                                        last_seen = NOW()
+                                    WHERE control_number = ? AND id != ?
+                                ");
+                                $rel_stmt->execute([$control_number, $target_ip_id]);
+
+                                logAudit($pdo, 'reconcile_update', "Synced IP Inventory ($target_ip) to match Computer Inventory for $control_number", 'reconciliation', null);
+                                $success_msg = "IP Inventory ($target_ip) updated successfully for $control_number.";
+                            } else {
+                                $error_msg = "IP address $target_ip does not exist in the 2,032 IP inventory pool. No rows were added.";
+                            }
                         } else {
-                            // Check if the target IP already exists in a DIFFERENT ips row
-                            $check_dup = $pdo->prepare("SELECT id, control_number FROM ips WHERE ip_address = ? AND id != ?");
-                            $check_dup->execute([$comp_data['ip_address'], $own_id]);
-                            $existing = $check_dup->fetch();
+                            // Computer has DHCP, empty, or unassigned IP -> release any IP row held by this control number
+                            $rel_stmt = $pdo->prepare("
+                                UPDATE ips 
+                                SET status = 'available',
+                                    device_type = 'Other',
+                                    mac_address = NULL,
+                                    hostname = NULL,
+                                    control_number = NULL,
+                                    location = NULL,
+                                    om_name = NULL,
+                                    department = NULL,
+                                    description = NULL,
+                                    remarks = NULL,
+                                    last_seen = NOW()
+                                WHERE control_number = ?
+                            ");
+                            $rel_stmt->execute([$control_number]);
 
-                            if ($existing) {
-                                // Auto-resolve: clear the IP and MAC from the conflicting row
-                                // so this address can be assigned to the correct control number.
-                                $clear_conflict = $pdo->prepare("UPDATE ips SET ip_address = '', mac_address = '' WHERE id = ?");
-                                $clear_conflict->execute([$existing['id']]);
-
-                                $assigned_to = !empty($existing['control_number'])
-                                    ? $existing['control_number']
-                                    : 'an unassigned IP Inventory record';
-                                logAudit($pdo, 'reconcile_conflict_clear', "Cleared IP/MAC from conflicting IP Inventory record (ID: {$existing['id']}, CN: $assigned_to) to free address {$comp_data['ip_address']} for $control_number", 'reconciliation', null);
-                            }
-                            // Proceed: either no conflict existed, or we just cleared it
-                            if (true) {
-                                // Update only the specific row by id to avoid touching sibling rows
-                                $update = $pdo->prepare("UPDATE ips SET ip_address = ?, mac_address = ? WHERE id = ?");
-                                $update->execute([$comp_data['ip_address'], $comp_data['mac_address'], $own_id]);
-
-                                logAudit($pdo, 'reconcile_update', "Synced IP Inventory to match Computer Inventory for $control_number", 'reconciliation', null);
-                                $success_msg = "IP Inventory updated successfully for $control_number.";
-                            }
+                            logAudit($pdo, 'reconcile_update', "Released IP Inventory records for $control_number (computer IP is DHCP/unassigned)", 'reconciliation', null);
+                            $success_msg = "IP record released to Available for $control_number (Computer IP: " . ($target_ip ?: 'None') . ").";
                         }
                     } else {
-                        $error_msg = "Source data missing in Computer Inventory.";
+                        $error_msg = "Source data missing in Computer Inventory for $control_number.";
                     }
                 } catch (Exception $e) {
                     $error_msg = "Error updating IP Inventory: " . $e->getMessage();
@@ -96,83 +183,170 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // --- ACTIONS FOR IDENTITY CONFLICT VIEW ---
     elseif ($view === 'conflict') {
         if ($_POST['action'] === 'set_ip_owner') {
-             // "Set IP Owner" -> Update IP Inventory's Control # to match Computer's
-             $target_ip_id = $_POST['ip_id'] ?? '';
-             $new_control_number = $_POST['new_control_number'] ?? '';
+             // "Set IP Owner" -> Assign this existing IP to the Computer's Control Number
+             $target_ip_id = (int)($_POST['ip_id'] ?? 0);
+             $new_control_number = trim($_POST['new_control_number'] ?? '');
              
              if ($target_ip_id && $new_control_number) {
                  try {
-                     // Update control number, status to active, and last_seen timestamp
-                     $update = $pdo->prepare("UPDATE ips SET control_number = ?, status = 'active', last_seen = NOW() WHERE id = ?");
-                     $update->execute([$new_control_number, $target_ip_id]);
-                     
-                     logAudit($pdo, 'reconcile_identity_conflict', "Updated IP Inventory Control # to $new_control_number and set status to Active", 'reconciliation', null);
-                     $success_msg = "IP ownership transferred to $new_control_number and status set to Active.";
+                     // 1. Fetch IP record
+                     $ip_stmt = $pdo->prepare("SELECT id, ip_address FROM ips WHERE id = ?");
+                     $ip_stmt->execute([$target_ip_id]);
+                     $ip_row = $ip_stmt->fetch(PDO::FETCH_ASSOC);
+
+                     // 2. Fetch Computer record
+                     $comp_stmt = $pdo->prepare("SELECT id, end_user, department, mac_address FROM computers WHERE control_number = ? LIMIT 1");
+                     $comp_stmt->execute([$new_control_number]);
+                     $comp_row = $comp_stmt->fetch(PDO::FETCH_ASSOC);
+
+                     if ($ip_row && $comp_row) {
+                         $clean_mac = strtoupper(str_replace(':', '-', trim($comp_row['mac_address'] ?? '')));
+
+                         // 3. Update the existing IP record
+                         $update = $pdo->prepare("
+                             UPDATE ips 
+                             SET control_number = :ctrl,
+                                 om_name = :om,
+                                 department = :dept,
+                                 mac_address = CASE WHEN :mac != '' THEN :mac ELSE mac_address END,
+                                 status = 'active',
+                                 device_type = 'Workstation',
+                                 last_seen = NOW() 
+                             WHERE id = :id
+                         ");
+                         $update->execute([
+                             ':ctrl' => $new_control_number,
+                             ':om'   => $comp_row['end_user'],
+                             ':dept' => $comp_row['department'],
+                             ':mac'  => $clean_mac,
+                             ':id'   => $target_ip_id,
+                         ]);
+
+                         // 4. Release any other IP row previously held by this control number
+                         $rel_stmt = $pdo->prepare("
+                             UPDATE ips 
+                             SET status = 'available',
+                                 device_type = 'Other',
+                                 mac_address = NULL,
+                                 hostname = NULL,
+                                 control_number = NULL,
+                                 location = NULL,
+                                 om_name = NULL,
+                                 department = NULL,
+                                 description = NULL,
+                                 remarks = NULL,
+                                 last_seen = NOW() 
+                             WHERE control_number = ? AND id != ?
+                         ");
+                         $rel_stmt->execute([$new_control_number, $target_ip_id]);
+
+                         // 5. Update Computer Inventory to point to this IP
+                         $comp_up = $pdo->prepare("UPDATE computers SET ip_address = ? WHERE control_number = ?");
+                         $comp_up->execute([$ip_row['ip_address'], $new_control_number]);
+                         syncComputerToAsset($pdo, $comp_row['id']);
+
+                         logAudit($pdo, 'reconcile_identity_conflict', "Assigned IP {$ip_row['ip_address']} (ID: $target_ip_id) to $new_control_number and set status to Active", 'reconciliation', null);
+                         $success_msg = "IP {$ip_row['ip_address']} ownership transferred to $new_control_number and status set to Active.";
+                     } else {
+                         $error_msg = "Record not found in IP or Computer Inventory.";
+                     }
                  } catch (Exception $e) {
                      $error_msg = "Error updating IP ownership: " . $e->getMessage();
                  }
              }
         } elseif ($_POST['action'] === 'update_comp_cn') {
             // "Update Computer CN" -> Update Computer Inventory's Control # to match IP's
-            $target_comp_id = $_POST['comp_id'] ?? '';
-            $new_control_number = $_POST['new_control_number'] ?? '';
-            $ip_id = $_POST['ip_id'] ?? ''; // Get IP ID to update its status
+            $target_comp_id = (int)($_POST['comp_id'] ?? 0);
+            $new_control_number = trim($_POST['new_control_number'] ?? '');
+            $ip_id = (int)($_POST['ip_id'] ?? 0);
             
             if ($target_comp_id && $new_control_number) {
                 try {
                     // Update computer control number
                     $update = $pdo->prepare("UPDATE computers SET control_number = ? WHERE id = ?");
                     $update->execute([$new_control_number, $target_comp_id]);
+                    syncComputerToAsset($pdo, $target_comp_id);
                     
                     // Also update IP status to active if IP ID is provided
                     if ($ip_id) {
-                        $update_ip = $pdo->prepare("UPDATE ips SET status = 'active', last_seen = NOW() WHERE id = ?");
+                        $update_ip = $pdo->prepare("UPDATE ips SET status = 'active', device_type = 'Workstation', last_seen = NOW() WHERE id = ?");
                         $update_ip->execute([$ip_id]);
                     }
                     
-                    logAudit($pdo, 'reconcile_identity_conflict', "Updated Computer Inventory Control # to $new_control_number and set IP status to Active", 'reconciliation', null);
+                    logAudit($pdo, 'reconcile_identity_conflict', "Updated Computer ID $target_comp_id Control # to $new_control_number and set IP status to Active", 'reconciliation', null);
                     $success_msg = "Computer Control Number updated to $new_control_number and IP status set to Active.";
                 } catch (Exception $e) {
                     $error_msg = "Error updating Computer Control Number: " . $e->getMessage();
                 }
             }
         } elseif ($_POST['action'] === 'transfer_comp_to_ip') {
-            // "Transfer Computer Data to IP" -> Full Update of IP record
-            $comp_id = $_POST['comp_id'] ?? '';
-            $ip_id = $_POST['ip_id'] ?? '';
+            // "Transfer Computer Data to IP" -> Full Update of existing IP record
+            $comp_id = (int)($_POST['comp_id'] ?? 0);
+            $ip_id = (int)($_POST['ip_id'] ?? 0);
 
             if ($comp_id && $ip_id) {
                 try {
                     // Fetch source computer data
-                    $stmt_src = $pdo->prepare("SELECT control_number, end_user, department, mac_address FROM computers WHERE id = ?");
+                    $stmt_src = $pdo->prepare("SELECT id, control_number, end_user, department, mac_address FROM computers WHERE id = ?");
                     $stmt_src->execute([$comp_id]);
                     $comp_data = $stmt_src->fetch(PDO::FETCH_ASSOC);
 
-                    if ($comp_data) {
-                        // Update IP Inventory
+                    // Fetch IP row
+                    $stmt_ip = $pdo->prepare("SELECT id, ip_address FROM ips WHERE id = ?");
+                    $stmt_ip->execute([$ip_id]);
+                    $ip_data = $stmt_ip->fetch(PDO::FETCH_ASSOC);
+
+                    if ($comp_data && $ip_data) {
+                        $clean_mac = strtoupper(str_replace(':', '-', trim($comp_data['mac_address'] ?? '')));
+
+                        // 1. Update the existing IP row
                         $update = $pdo->prepare("
                             UPDATE ips 
                             SET 
-                                control_number = ?, 
-                                om_name = ?, 
-                                department = ?, 
-                                mac_address = ?, 
+                                control_number = :ctrl, 
+                                om_name = :om, 
+                                department = :dept, 
+                                mac_address = CASE WHEN :mac != '' THEN :mac ELSE mac_address END, 
                                 status = 'active', 
+                                device_type = 'Workstation',
                                 last_seen = NOW() 
-                            WHERE id = ?
+                            WHERE id = :id
                         ");
                         $update->execute([
-                            $comp_data['control_number'],
-                            $comp_data['end_user'],
-                            $comp_data['department'],
-                            $comp_data['mac_address'],
-                            $ip_id
+                            ':ctrl' => $comp_data['control_number'],
+                            ':om'   => $comp_data['end_user'],
+                            ':dept' => $comp_data['department'],
+                            ':mac'  => $clean_mac,
+                            ':id'   => $ip_id
                         ]);
 
-                        logAudit($pdo, 'reconcile_transfer', "Transferred Computer Data ({$comp_data['control_number']}) to IP ID $ip_id", 'reconciliation', null);
-                        $success_msg = "Successfully transferred Computer Inventory data ({$comp_data['control_number']}) to IP Inventory.";
+                        // 2. Release any other IP row holding this control number
+                        $rel_stmt = $pdo->prepare("
+                            UPDATE ips 
+                            SET status = 'available',
+                                device_type = 'Other',
+                                mac_address = NULL,
+                                hostname = NULL,
+                                control_number = NULL,
+                                location = NULL,
+                                om_name = NULL,
+                                department = NULL,
+                                description = NULL,
+                                remarks = NULL,
+                                last_seen = NOW() 
+                            WHERE control_number = ? AND id != ?
+                        ");
+                        $rel_stmt->execute([$comp_data['control_number'], $ip_id]);
+
+                        // 3. Update computer's IP address to this IP
+                        $comp_up = $pdo->prepare("UPDATE computers SET ip_address = ? WHERE id = ?");
+                        $comp_up->execute([$ip_data['ip_address'], $comp_id]);
+                        syncComputerToAsset($pdo, $comp_id);
+
+                        logAudit($pdo, 'reconcile_transfer', "Transferred Computer Data ({$comp_data['control_number']}) to IP {$ip_data['ip_address']} (ID: $ip_id)", 'reconciliation', null);
+                        $success_msg = "Successfully transferred Computer data ({$comp_data['control_number']}) to IP {$ip_data['ip_address']}.";
                     } else {
-                        $error_msg = "Computer record not found.";
+                        $error_msg = "Computer or IP record not found.";
                     }
                 } catch (Exception $e) {
                     $error_msg = "Error transferring data: " . $e->getMessage();
@@ -243,6 +417,7 @@ if ($view === 'mismatch') {
     
     $sql = "
     SELECT 
+        c.id as comp_id, i.id as ip_id,
         c.control_number, c.end_user, c.department,
         i.ip_address as ip_inv_ip, i.mac_address as ip_inv_mac,
         c.ip_address as comp_inv_ip, c.mac_address as comp_inv_mac
@@ -439,16 +614,22 @@ if ($is_ajax) {
                                 <td class="px-4 py-4 text-right align-middle">
                                     <div class="flex flex-col gap-2 items-end">
                                         <form method="POST" onsubmit="return confirm('Update COMPUTER INVENTORY with data from IP Inventory?');">
+                                            <?= getCsrfInput() ?>
                                             <input type="hidden" name="action" value="retain_ip">
                                             <input type="hidden" name="control_number" value="<?= htmlspecialchars($row['control_number']) ?>">
+                                            <input type="hidden" name="ip_id" value="<?= htmlspecialchars($row['ip_id'] ?? '') ?>">
+                                            <input type="hidden" name="comp_id" value="<?= htmlspecialchars($row['comp_id'] ?? '') ?>">
                                             <button type="submit" class="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-slate-900 dark:hover:text-white transition-all text-xs font-bold border border-emerald-500/20">
                                                 <span class="material-symbols-outlined text-[16px]">arrow_forward</span> Use IP Data
                                             </button>
                                         </form>
                                         
                                         <form method="POST" onsubmit="return confirm('Update IP INVENTORY with data from Computer Inventory?');">
+                                            <?= getCsrfInput() ?>
                                             <input type="hidden" name="action" value="retain_computer">
                                             <input type="hidden" name="control_number" value="<?= htmlspecialchars($row['control_number']) ?>">
+                                            <input type="hidden" name="ip_id" value="<?= htmlspecialchars($row['ip_id'] ?? '') ?>">
+                                            <input type="hidden" name="comp_id" value="<?= htmlspecialchars($row['comp_id'] ?? '') ?>">
                                             <button type="submit" class="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500 text-blue-500 hover:text-slate-900 dark:hover:text-white transition-all text-xs font-bold border border-blue-500/20">
                                                 <span class="material-symbols-outlined text-[16px]">arrow_back</span> Use Comp Data
                                             </button>
@@ -506,8 +687,10 @@ if ($is_ajax) {
                                 <td class="px-4 py-4 text-right align-middle">
                                     <div class="flex flex-col gap-2 items-end">
                                         <form method="POST" onsubmit="return confirm('Change IP Inventory owner to <?= htmlspecialchars($row['comp_cn']) ?>?');">
+                                            <?= getCsrfInput() ?>
                                             <input type="hidden" name="action" value="set_ip_owner">
                                             <input type="hidden" name="ip_id" value="<?= htmlspecialchars($row['ip_id']) ?>">
+                                            <input type="hidden" name="comp_id" value="<?= htmlspecialchars($row['comp_id']) ?>">
                                             <input type="hidden" name="new_control_number" value="<?= htmlspecialchars($row['comp_cn']) ?>">
                                             <button type="submit" class="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-slate-900 dark:hover:text-white transition-all text-xs font-bold border border-emerald-500/20" title="Transfer IP to <?= htmlspecialchars($row['comp_cn']) ?>">
                                                 <span class="material-symbols-outlined text-[16px]">sync_alt</span> IP Owner to <?= htmlspecialchars($row['comp_cn']) ?>
@@ -515,6 +698,7 @@ if ($is_ajax) {
                                         </form>
                                         
                                         <form method="POST" onsubmit="return confirm('Fully overwrite IP Inventory data with Computer Inventory data (CN, User, Dept, MAC)?');">
+                                            <?= getCsrfInput() ?>
                                             <input type="hidden" name="action" value="transfer_comp_to_ip">
                                             <input type="hidden" name="comp_id" value="<?= htmlspecialchars($row['comp_id']) ?>">
                                             <input type="hidden" name="ip_id" value="<?= htmlspecialchars($row['ip_id']) ?>">
@@ -524,6 +708,7 @@ if ($is_ajax) {
                                         </form>
 
                                         <form method="POST" onsubmit="return confirm('Change Computer Inventory CN to <?= htmlspecialchars($row['ip_cn']) ?>? This is rare.');">
+                                            <?= getCsrfInput() ?>
                                             <input type="hidden" name="action" value="update_comp_cn">
                                             <input type="hidden" name="comp_id" value="<?= htmlspecialchars($row['comp_id']) ?>">
                                             <input type="hidden" name="ip_id" value="<?= htmlspecialchars($row['ip_id']) ?>">

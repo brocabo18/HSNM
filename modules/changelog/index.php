@@ -1,4 +1,4 @@
-﻿﻿<?php
+<?php
 require_once '../../config.php';
 requireLogin();
 
@@ -28,6 +28,11 @@ function detectSystemChanges($pdo): array
     // Human-readable module name map
     $module_map = [
         'computers'      => 'Computer Inventory',
+        'jasmc_st'       => 'JASMC-ST (Sto. Tomas)',
+        'jasmc_vt'       => 'JASMC-VT (Victoria Tarlac)',
+        'doh_jbl_cmc'    => 'DOH-JBL-CMC (Children\'s Medical Center)',
+        'assets'         => 'Asset Inventory',
+        'maintenance'    => 'Preventive Maintenance',
         'ips'            => 'IP Address Inventory',
         'office'         => 'MS Office Licenses',
         'printers'       => 'Printer Inventory',
@@ -44,6 +49,14 @@ function detectSystemChanges($pdo): array
         'audit_logs'     => 'Audit Logs',
     ];
 
+    // Helper to get current system version for auto-detected items
+    $latest_version = '1.15.2';
+    try {
+        $stmt_v = $pdo->query("SELECT version FROM changelog WHERE version IS NOT NULL AND TRIM(version) != '' AND version NOT LIKE '%-scan%' ORDER BY id DESC LIMIT 1");
+        $v_row = $stmt_v ? $stmt_v->fetchColumn() : null;
+        if ($v_row) $latest_version = ltrim($v_row, 'v');
+    } catch (Exception $ve) {}
+
     // Is this the very first scan? (baseline init — no changelog spam)
     $is_baseline = ((int)$pdo->query("SELECT COUNT(*) FROM file_checksums")->fetchColumn() === 0);
 
@@ -54,7 +67,7 @@ function detectSystemChanges($pdo): array
     ");
     $get_hash  = $pdo->prepare("SELECT file_hash FROM file_checksums WHERE file_path = ?");
     $dup_check = $pdo->prepare("SELECT id FROM changelog WHERE title = ? AND change_date = CURRENT_DATE LIMIT 1");
-    $ins_log   = $pdo->prepare("INSERT INTO changelog (change_type, module, title, description, change_date) VALUES (?, ?, ?, ?, CURRENT_DATE)");
+    $ins_log   = $pdo->prepare("INSERT INTO changelog (version, change_type, module, title, description, change_date) VALUES (?, ?, ?, ?, ?, CURRENT_DATE)");
 
     $detected = [];
 
@@ -104,7 +117,7 @@ function detectSystemChanges($pdo): array
         $dup_check->execute([$title]);
         if ($dup_check->fetch()) continue;
 
-        $ins_log->execute([$type, $area, $title, $desc]);
+        $ins_log->execute([$latest_version, $type, $area, $title, $desc]);
         $detected[] = ['type' => $type, 'area' => $area, 'title' => $title];
     }
 
@@ -236,27 +249,32 @@ function getTypeIcon($type)
 ?>
 
 <div class="p-4 md:p-8 flex-1 overflow-y-auto custom-scrollbar relative z-10 bg-slate-50 dark:bg-background-dark">
-    <header
-        class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-6 mb-8 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
+    <header class="-mt-4 -mx-4 md:-mt-8 md:-mx-8 px-4 md:px-8 pt-4 md:pt-8 pb-4 mb-6 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 sticky top-0 bg-slate-50 dark:bg-background-dark z-20 border-b border-slate-200 dark:border-[#232b3d]">
         <div>
-            <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Changelog</h2>
-            <p class="text-sm text-slate-500 mt-1">Auto-tracks all system code changes, new modules, features, and improvements.</p>
+            <div class="flex items-center gap-2 mb-1">
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase bg-primary/10 text-primary border border-primary/20">Version History</span>
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-primary/10 text-primary border border-primary/20">
+                    <?= getAppVersion($pdo) ?>
+                </span>
+            </div>
+            <h2 class="text-2xl font-bold text-slate-900 dark:text-white">System Changelog</h2>
+            <p class="text-xs text-slate-400 mt-0.5">Automated tracking for codebase changes, updates, fixes, and enhancements</p>
         </div>
-        <div class="flex items-center gap-2 text-xs text-slate-400">
-            <span class="material-symbols-outlined text-[16px] text-emerald-500">radar</span>
+        <div class="no-print flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold">
+            <span class="material-symbols-outlined text-[16px]">radar</span>
             Auto-scan active
         </div>
     </header>
 
     <?php if (!empty($scan_detected)): ?>
-        <div class="mb-6 bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 p-4 rounded-xl text-sm">
-            <div class="flex items-center gap-2 font-bold mb-2">
-                <span class="material-symbols-outlined text-[18px]">radar</span>
+        <div class="mb-4 p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 text-xs font-semibold no-print">
+            <div class="flex items-center gap-2 font-bold mb-1">
+                <span class="material-symbols-outlined text-[16px]">radar</span>
                 <?= count($scan_detected) ?> new system change(s) auto-detected and logged
             </div>
-            <ul class="ml-6 space-y-0.5">
+            <ul class="ml-5 space-y-0.5">
                 <?php foreach ($scan_detected as $r): ?>
-                    <li class="text-xs flex items-center gap-1.5">
+                    <li class="text-[11px] flex items-center gap-1.5 font-normal">
                         <span class="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block flex-shrink-0"></span>
                         <?= htmlspecialchars($r['title']) ?>
                     </li>
@@ -265,65 +283,56 @@ function getTypeIcon($type)
         </div>
     <?php endif; ?>
 
-    <!-- Statistics Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+    <!-- Statistics Cards Grid -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6 no-print">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Features</div>
-                    <div class="text-2xl font-bold text-blue-500"><?= number_format($stats['feature'] ?? 0) ?></div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-blue-500/20">new_releases</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Features</span>
+                <span class="material-symbols-outlined text-blue-500 text-base">new_releases</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-blue-500"><?= number_format($stats['feature'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">New functionality</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Bug Fixes</div>
-                    <div class="text-2xl font-bold text-red-500"><?= number_format($stats['bugfix'] ?? 0) ?></div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-red-500/20">bug_report</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Bug Fixes</span>
+                <span class="material-symbols-outlined text-red-500 text-base">bug_report</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-red-500"><?= number_format($stats['bugfix'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">Resolved defects</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Enhancements</div>
-                    <div class="text-2xl font-bold text-purple-500"><?= number_format($stats['enhancement'] ?? 0) ?>
-                    </div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-purple-500/20">upgrade</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Enhancements</span>
+                <span class="material-symbols-outlined text-purple-500 text-base">upgrade</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-purple-400"><?= number_format($stats['enhancement'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">System improvements</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Security</div>
-                    <div class="text-2xl font-bold text-amber-500"><?= number_format($stats['security'] ?? 0) ?></div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-amber-500/20">shield</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Security</span>
+                <span class="material-symbols-outlined text-amber-500 text-base">shield</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-amber-500"><?= number_format($stats['security'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">Hardening &amp; audits</span>
         </div>
-        <div class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] p-4 rounded-xl">
+        <div class="bg-white dark:bg-[#161d2b] p-4 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm">
             <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Refactors</div>
-                    <div class="text-2xl font-bold text-cyan-500"><?= number_format($stats['refactor'] ?? 0) ?></div>
-                </div>
-                <span class="material-symbols-outlined text-4xl text-cyan-500/20">construction</span>
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Refactors</span>
+                <span class="material-symbols-outlined text-cyan-500 text-base">construction</span>
             </div>
+            <p class="text-2xl font-bold mt-1 text-cyan-400"><?= number_format($stats['refactor'] ?? 0) ?></p>
+            <span class="text-[10px] text-slate-400">Code cleanups</span>
         </div>
     </div>
 
-    <!-- Filters -->
-    <div class="mb-6 flex gap-3">
-        <form method="GET" class="flex items-center gap-3 flex-wrap w-full">
-            <div class="relative group">
-                <span
-                    class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-slate-500">search</span>
-                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>"
-                    placeholder="Search changelog..."
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-200 text-xs rounded-xl pl-9 pr-4 py-2 focus:ring-2 focus:ring-primary focus:border-transparent w-64">
+    <!-- Filters / Control Bar -->
+    <div class="bg-white dark:bg-[#161d2b] p-3 rounded-xl border border-slate-200 dark:border-[#232b3d] shadow-sm mb-4 no-print">
+        <form method="GET" class="flex flex-wrap items-center gap-2">
+            <div class="relative flex-1 min-w-[200px]">
+                <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+                <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search_term) ?>" placeholder="Search changelog..." class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-primary">
             </div>
 
             <input type="hidden" name="type"       id="hid_cl_type"   value="<?= htmlspecialchars($filter_type) ?>">
@@ -336,18 +345,16 @@ function getTypeIcon($type)
             elseif($filter_module!=='All'&&$filter_module!==''){$cl_ac='module';    $cl_av=$filter_module;$cl_al=$filter_module;}
             elseif($filter_date!=='All'&&$filter_date!=='')  {$cl_ac='date_range';$cl_av=$filter_date;  $cl_al=$cl_date_labels[$filter_date]??$filter_date;}
             ?>
-            <select id="cl_cat" onchange="clOnCat(this.value)"
-                class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
+            <select id="cl_cat" onchange="clOnCat(this.value)" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                 <option value="">Filter by...</option>
                 <option value="type"       <?= $cl_ac==='type'      ?'selected':'' ?>>Type</option>
                 <option value="module"     <?= $cl_ac==='module'    ?'selected':'' ?>>Module</option>
                 <option value="date_range" <?= $cl_ac==='date_range'?'selected':'' ?>>Date Range</option>
             </select>
-            <select id="cl_val" onchange="clApply(this.value)"
-                class="<?= $cl_ac?'':'hidden' ?> bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
+            <select id="cl_val" onchange="clApply(this.value)" class="<?= $cl_ac?'':'hidden' ?> px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary max-w-[200px]">
             </select>
             <?php if($cl_ac): ?>
-            <div class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 border border-primary/30 text-primary text-xs font-semibold rounded-xl">
+            <div class="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 border border-primary/20 text-primary text-xs font-semibold rounded-lg">
                 <span class="material-symbols-outlined text-[13px]">filter_alt</span>
                 <?= htmlspecialchars($cl_al) ?>
                 <a href="?search=<?= urlencode($search_term) ?>&limit=<?= urlencode($limit_param) ?>" class="ml-1 text-primary/60 hover:text-red-500" title="Clear">
@@ -388,42 +395,34 @@ function getTypeIcon($type)
                 document.getElementById(_clHid[c]).value=val;
                 document.getElementById('cl_cat').closest('form').submit();
             }
-            document.addEventListener('DOMContentLoaded',function(){if(_clAC)clOnCat(_clAC);});
+            document.addEventListener('DOMContentLoaded',function(){if(_clAC)ilOnCat(_clAC);});
             </script>
+
+            <select name="limit" onchange="this.form.submit()" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+                <option value="20" <?= $limit_param == '20' ? 'selected' : '' ?>>20</option>
+                <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>15</option>
+                <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>50</option>
+                <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>100</option>
+                <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>All</option>
+            </select>
+
+            <button type="submit" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white transition-all shadow-sm">
+                Filter
+            </button>
+
+            <?php if ($search_term || $cl_ac): ?>
+                <a href="index.php" class="px-2.5 py-1.5 text-xs font-medium text-red-500 hover:text-red-600 transition-colors">
+                    Clear
+                </a>
+            <?php endif; ?>
 
             <!-- Top Pagination -->
             <?php if ($total_pages > 1): ?>
-                <div class="flex items-center gap-2 ml-auto">
-                    <span class="text-xs text-slate-500 mr-2">Page <?= $page ?> of <?= $total_pages ?></span>
-                    <div
-                        class="flex h-9 bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] rounded-xl overflow-hidden mr-2">
-                        <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&type=<?= urlencode($filter_type) ?>&module=<?= urlencode($filter_module) ?>&date_range=<?= urlencode($filter_date) ?>&limit=<?= $limit ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors border-r border-slate-200 dark:border-[#232b3d] <?= $page <= 1 ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_left</span>
-                        </a>
-                        <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&type=<?= urlencode($filter_type) ?>&module=<?= urlencode($filter_module) ?>&date_range=<?= urlencode($filter_date) ?>&limit=<?= $limit ?>"
-                            class="px-3 flex items-center justify-center hover:bg-white/5 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors <?= $page >= $total_pages ? 'pointer-events-none opacity-50' : '' ?>">
-                            <span class="material-symbols-outlined text-[18px]">chevron_right</span>
-                        </a>
-                    </div>
-                    <select name="limit" onchange="this.form.submit()"
-                        class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary">
-                        <option value="20" <?= $limit_param == '20' ? 'selected' : '' ?>>Show: 20</option>
-                        <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                        <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                        <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                        <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                    </select>
+                <div class="ml-auto flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Page <?= $page ?> of <?= $total_pages ?></span>
+                    <a href="?page=<?= max(1, $page - 1) ?>&search=<?= urlencode($search_term) ?>&type=<?= urlencode($filter_type) ?>&module=<?= urlencode($filter_module) ?>&date_range=<?= urlencode($filter_date) ?>&limit=<?= $limit ?>" class="p-1 rounded bg-slate-100 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 <?= $page <= 1 ? 'pointer-events-none opacity-40' : 'hover:bg-slate-200 dark:hover:bg-[#232b3d]' ?>"><span class="material-symbols-outlined text-sm block">chevron_left</span></a>
+                    <a href="?page=<?= min($total_pages, $page + 1) ?>&search=<?= urlencode($search_term) ?>&type=<?= urlencode($filter_type) ?>&module=<?= urlencode($filter_module) ?>&date_range=<?= urlencode($filter_date) ?>&limit=<?= $limit ?>" class="p-1 rounded bg-slate-100 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-600 dark:text-slate-300 <?= $page >= $total_pages ? 'pointer-events-none opacity-40' : 'hover:bg-slate-200 dark:hover:bg-[#232b3d]' ?>"><span class="material-symbols-outlined text-sm block">chevron_right</span></a>
                 </div>
-            <?php else: ?>
-                <select name="limit" onchange="this.form.submit()"
-                    class="bg-white dark:bg-[#1a2130] border border-slate-200 dark:border-[#232b3d] text-slate-400 text-xs rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary ml-auto">
-                    <option value="20" <?= $limit_param == '20' ? 'selected' : '' ?>>Show: 20</option>
-                    <option value="15" <?= $limit_param == '15' ? 'selected' : '' ?>>Show: 15</option>
-                    <option value="50" <?= $limit_param == '50' ? 'selected' : '' ?>>Show: 50</option>
-                    <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>Show: 100</option>
-                    <option value="all" <?= $limit_param == 'all' ? 'selected' : '' ?>>Show: All</option>
-                </select>
             <?php endif; ?>
         </form>
     </div>
@@ -475,9 +474,8 @@ function getTypeIcon($type)
                                         <?= htmlspecialchars($entry['module']) ?>
                                     </span>
                                 <?php endif; ?>
-                                <?php if ($entry['version']): ?>
-                                    <span class="text-xs text-slate-500 font-mono">v<?= htmlspecialchars($entry['version']) ?>
-                                    </span>
+                                <?php if (!empty($entry['version'])): ?>
+                                    <span class="text-xs text-slate-500 font-mono">v<?= htmlspecialchars(ltrim($entry['version'], 'v')) ?></span>
                                 <?php endif; ?>
                             </div>
                             <div class="flex items-center gap-2 md:gap-3 flex-wrap">
