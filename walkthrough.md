@@ -1,6 +1,11 @@
 # HSNM — System Walkthrough Guide
 
-> **Hardware & Software Network Management** — a web-based IT asset and network management system built on PHP + PostgreSQL (XAMPP stack), styled with Tailwind CSS.
+[![Version](https://img.shields.io/badge/version-1.15.5-blue.svg)](modules/changelog/)
+[![PHP](https://img.shields.io/badge/PHP-8.1+-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v3-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+
+> **Hardware & Security Network Management (HSNM)** &mdash; an enterprise healthcare IT infrastructure, network operations, property asset lifecycle, and preventive maintenance audit platform built on native PHP 8.1+ and PostgreSQL 15+ (XAMPP stack), styled with Tailwind CSS.
 
 ---
 
@@ -10,87 +15,147 @@
 2. [Technology Stack](#2-technology-stack)
 3. [Directory Structure](#3-directory-structure)
 4. [Authentication & Session Management](#4-authentication--session-management)
-5. [Front-End Layout](#5-front-end-layout)
-6. [Role-Based Access Control](#6-role-based-access-control)
-7. [Modules Overview](#7-modules-overview)
-8. [Database Schema](#8-database-schema)
-9. [Back-End Patterns](#9-back-end-patterns)
-10. [Security Features](#10-security-features)
+5. [Front-End Layout & UI Architecture](#5-front-end-layout--ui-architecture)
+6. [Role-Based Access Control (RBAC)](#6-role-based-access-control-rbac)
+7. [Comprehensive Modules Walkthrough](#7-comprehensive-modules-walkthrough)
+   - [7.1 Executive Dashboard (`index.php`) & Query Isolation Architecture](#71-executive-dashboard-indexphp--query-isolation-architecture)
+   - [7.2 Central Computer Inventory (`modules/computers/`)](#72-central-computer-inventory-modulescomputers)
+   - [7.3 Multi-Facility Satellite Computers (`jasmc_st`, `jasmc_vt`, `doh_jbl_cmc`)](#73-multi-facility-satellite-computers-jasmc_st-jasmc_vt-doh_jbl_cmc)
+   - [7.4 Hospital & Satellite IP Address Management](#74-hospital--satellite-ip-address-management)
+   - [7.5 Capital Asset Registry (`modules/assets/`)](#75-capital-asset-registry-modulesassets)
+   - [7.6 Preventive Maintenance (PM) Suite (`modules/maintenance/`)](#76-preventive-maintenance-pm-suite-modulesmaintenance)
+   - [7.7 Network Hardware: Routers & Switches](#77-network-hardware-routers--switches)
+   - [7.8 Reconciliation Engine (`modules/reconciliation/`)](#78-reconciliation-engine-modulesreconciliation)
+   - [7.9 Software Licensing: Microsoft Office (`modules/office/`)](#79-software-licensing-microsoft-office-modulesoffice)
+   - [7.10 Endpoint Security & Firewall Compliance (`modules/firewall/`)](#710-endpoint-security--firewall-compliance-modulesfirewall)
+   - [7.11 Hospital Auxiliaries (Printers, PABX, Queueing TV, ICS, Links)](#711-hospital-auxiliaries-printers-pabx-queueing-tv-ics-links)
+   - [7.12 Administration, Auditing & Reports (Logs, Settings, Changelog, Reports)](#712-administration-auditing--reports-logs-settings-changelog-reports)
+   - [7.13 Cloud Database Synchronization Engine 2.0 (`sync_neon.php`)](#713-cloud-database-synchronization-engine-20-sync_neonphp)
+8. [Database Schema & Data Dictionary (All 22 Tables)](#8-database-schema--data-dictionary-all-22-tables)
+9. [Back-End Architectural Patterns](#9-back-end-architectural-patterns)
+10. [Security Hardening & Zero-Hardcoding Architecture](#10-security-hardening--zero-hardcoding-architecture)
+11. [Operational Runbook & Deployment Guide](#11-operational-runbook--deployment-guide)
 
 ---
 
 ## 1. System Architecture
 
-```
-Browser (Tailwind CSS + Vanilla JS)
-        │
-        ▼
-XAMPP Apache (PHP 8.x)
-        │
-        ├── config.php          ← DB connection, session, CSRF, helpers
-        ├── index.php           ← Dashboard
-        ├── login.php / logout.php
-        ├── includes/           ← Shared header, sidebar, footer
-        └── modules/            ← One folder per feature module
-                │
-                ▼
-        PostgreSQL (unified_network_inventory)
+HSNM operates as a high-performance intranet web platform backed by a local PostgreSQL database server, connected via an automated bi-directional synchronization bridge to a cloud-hosted Neon serverless PostgreSQL instance for disaster recovery.
+
+```mermaid
+flowchart TD
+    Client["Hospital & Satellite Workstations<br/>http://ihoms/HSNM"] --> Acrylic["Acrylic DNS Proxy (Port 53)<br/>Broadcasts 'ihoms' -> 192.163.10.11"]
+    Acrylic --> Apache["Apache Web Server 2.4.x (XAMPP)<br/>VirtualHost: ihoms (Port 80)"]
+    Apache --> AuthGate["Session & RBAC Gatekeeper<br/>(config.php -> requireLogin())"]
+    
+    subgraph AppCore["HSNM Application Core"]
+        AuthGate --> Dashboard["Executive Dashboard (index.php)<br/>(Isolated Query Metric Architecture)"]
+        AuthGate --> CompMain["Central Computers<br/>(/modules/computers/)"]
+        AuthGate --> SatComp["Satellite Computer Inventories<br/>(JASMC-ST, JASMC-VT, DOH-JBL-CMC)"]
+        AuthGate --> SatIP["Satellite IP Inventories<br/>(ips_jasmc_st, ips_jasmc_vt, ips_doh_jbl_cmc)"]
+        AuthGate --> AssetsMaint["Assets Registry & PM Suite<br/>(/modules/assets/, /modules/maintenance/)"]
+        AuthGate --> NetOps["Network & IP Operations<br/>(/modules/ips/, /modules/routers/, /modules/switches/)"]
+        AuthGate --> Recon["Reconciliation Engine<br/>(/modules/reconciliation/)"]
+        AuthGate --> SysSec["Security & Audit Logs<br/>(/modules/firewall/, /modules/logs/, /modules/changelog/)"]
+    end
+    
+    AppCore --> LocalPostgres[("Local PostgreSQL 15+<br/>(unified_network_inventory)")]
+    LocalPostgres <--> SyncWorker["Sync Engine 2.0<br/>(sync_neon.php / db_compare.php)"]
+    SyncWorker <--> CloudNeon[("Cloud Neon PostgreSQL<br/>(Serverless Failover Backup)")]
 ```
 
-- **No framework** — pure PHP with PDO.
-- All pages share a single `config.php` that bootstraps the DB connection, session, and helper functions.
-- Each module is self-contained: one `index.php` handles its own GET/POST logic.
+### Architectural Principles
+- **Framework-Free Simplicity**: Pure PHP 8.1+ using native `PDO_PGSQL` prepared statements. Eliminates vendor framework overhead, ensures instant loading, and provides 100% transparent control over queries and memory.
+- **Centralized Bootstrap**: All execution threads initialize through `config.php`, which establishes database connections, enforces session security, injects CSRF tokens, and provides audit trail helpers.
+- **Self-Contained Functional Modules**: Each module resides in its own subfolder under `/modules/`, handling its own GET filtering, pagination, and CSRF-protected POST actions.
+- **Offline Air-Gap Readiness**: Google Fonts and Material Symbols icons are self-hosted locally as WOFF2 binaries in `assets/fonts/`, supported by a local Tailwind CSS bundle to guarantee zero latency and UI consistency during WAN outages.
+- **Query Isolation**: Dashboard KPI queries operate in isolated try-catch closures (`$safeCount`, `$safeSum`), preventing schema drift or single-table errors from zeroing out dashboard metrics.
 
 ---
 
 ## 2. Technology Stack
 
-| Layer | Technology |
-|---|---|
-| Web server | Apache (XAMPP) |
-| Backend language | PHP 8.x |
-| Database | PostgreSQL |
-| DB abstraction | PDO (prepared statements) |
-| Frontend CSS | Tailwind CSS (CDN) |
-| Icons | Google Material Symbols |
-| JavaScript | Vanilla JS (no framework) |
-| Session | PHP native sessions |
-| Authentication | Password hashing via `password_hash()` / `password_verify()` |
+| Layer | Technology | Version / Configuration |
+|---|---|---|
+| **Web Server** | Apache HTTP Server (XAMPP) | v2.4.x with `mod_rewrite`, `mod_env`, `mod_vhost_alias` |
+| **Backend Language** | PHP | 8.1+ with `pdo_pgsql`, `zip`, `openssl`, `mbstring`, `curl` |
+| **Primary Database** | PostgreSQL Server | 15.x on `localhost:5432` (`unified_network_inventory`) |
+| **Cloud Failover Database** | Neon PostgreSQL | Serverless cloud instance with SSL pooling (`sslmode=require`) |
+| **Local DNS Engine** | Acrylic DNS Proxy | Port 53 multi-subnet DNS broadcast for hospital `/21` LAN |
+| **Styling & UI Framework** | Tailwind CSS | Utility-first CSS with dark/light mode local storage persistence |
+| **Typography & Icons** | Local WOFF2 Binaries | Inter (Latin) and Material Symbols Outlined self-hosted |
+| **Spreadsheet Engine** | Native OpenXML SpreadsheetML | Generated via PHP `ZipArchive` without 3rd-party memory bloat |
+| **Container & Cloud Deploy** | Render / Vercel | Containerized deploy via `start.sh` & `vercel.json` |
 
 ---
 
 ## 3. Directory Structure
 
 ```
-HSNM/
-├── config.php              ← Central bootstrap (DB, session, CSRF, helpers)
-├── index.php               ← Dashboard (overview + stats)
-├── login.php               ← Login page + POST handler
-├── logout.php              ← Session destroy + redirect
-├── .htaccess               ← URL rewriting / access control
-│
-├── includes/
-│   ├── header.php          ← HTML <head>, Tailwind, dark mode script
-│   ├── sidebar.php         ← Navigation sidebar (role-aware)
-│   └── footer.php          ← Closing HTML tags
-│
-├── modules/
-│   ├── routers/            ← Router inventory
-│   ├── switches/           ← Network switch inventory
-│   ├── ips/                ← IP address management
-│   ├── computers/          ← Computer inventory (main module)
-│   ├── office/             ← MS Office license tracking
-│   ├── reconciliation/     ← Cross-module data comparison (IPs vs Computers)
-│   ├── ics/                ← ICS (Inventory Control Sheet) — printable forms
-│   ├── pabx/               ← PABX telephone directory
-│   ├── ihoms_links/        ← IS/iHOMS quick-access links
-│   ├── printers/           ← Standalone printer inventory
-│   ├── queueing_tv/        ← Hospital queue display management
-│   ├── logs/               ← Audit log viewer (admin/editor only)
-│   ├── settings/           ← User management (admin only)
-│   └── changelog/          ← System changelog viewer
-│
-└── assets/                 ← Static assets (CSS, images)
+c:/xampp/htdocs/HSNM/
+├── config.php                     # Central bootstrap: DB connection, RBAC, CSRF, & audit helpers
+├── index.php                      # Executive dashboard with isolated query metrics
+├── login.php                      # Authentication gateway with session timeout enforcement
+├── logout.php                     # Session termination, cookie invalidation, & redirect handling
+├── db_compare.php                 # Database schema & row-count comparator (Local vs. Cloud)
+├── sync_neon.php                  # Multi-table cloud synchronization engine 2.0 with unique constraint handling
+├── run_status_migration.php       # Interactive database schema migration executor
+├── run_computers_to_assets_sync.php # One-click computer to asset registry migration & PMS seeding runner
+├── README.md                      # System overview and quick-start guide
+├── SYSTEM_DOCUMENTATION.md        # Detailed technical architecture and system manual
+├── USER_MANUAL.md                 # User operations and standard operating procedures (SOP)
+├── walkthrough.md                 # Developer & architecture walkthrough guide (this document)
+├── System Walkthrough Guide.md    # Canonical developer guide mirror
+├── assets/                        # Offline styling, local fonts, and icons
+│   ├── css/fonts.css              # Self-hosted typography stylesheets
+│   ├── fonts/                     # WOFF2 binaries (Inter, Material Symbols)
+│   └── js/tailwind.js             # Standalone Tailwind CSS JavaScript bundle
+├── database/                      # SQL migrations, baseline exports, and diagnostic tools
+│   ├── add_status_and_satellite_tables.sql  # Schema for satellite computer inventories & status columns
+│   ├── add_satellite_ip_tables.sql          # Schema for satellite IP inventories (ST, VT, CMC)
+│   ├── add_assets_maintenance_tables.sql    # Schema for assets and PM checklists
+│   ├── add_maintenance_status_option.sql    # Allows 'Maintenance' status across computer/satellite tables
+│   ├── add_module_access.sql                # User JSONB permission migration
+│   ├── widen_status_and_flag_columns.sql    # Column width extensions
+│   └── schema_export.sql                    # Full baseline database export
+├── includes/                      # Global UI components & shared partials
+│   ├── header.php                 # Meta tags, stylesheets, top navbar, & theme toggle
+│   ├── sidebar.php                # Left navigation tree with RBAC visibility controls & version badge
+│   ├── footer.php                 # Script tags, modal containers, & layout closers
+│   ├── satellite_computer_tabs.php # Switcher tabs for computer inventories
+│   └── satellite_ip_tabs.php      # Switcher tabs for IP inventories
+└── modules/                       # Functional business modules
+    ├── computers/                 # Central Workstation inventory & satellite transfer hub
+    │   ├── index.php              # Computer inventory list, Excel/CSV export, sectioned modals
+    │   └── _form_fields.php       # Shared reusable form partial for computer records
+    ├── jasmc_st/                  # JASMC-ST Satellite Computer Inventory
+    ├── jasmc_vt/                  # JASMC-VT Satellite Computer Inventory
+    ├── doh_jbl_cmc/               # DOH-JBL-CMC Satellite Computer Inventory
+    ├── ips/                       # IP Address Management, ping diagnostics, & ARP scanner
+    ├── ips_jasmc_st/              # JASMC-ST Satellite IP Inventory
+    ├── ips_jasmc_vt/              # JASMC-VT Satellite IP Inventory
+    ├── ips_doh_jbl_cmc/           # DOH-JBL-CMC Satellite IP Inventory
+    ├── assets/                    # General Asset Inventory & Property Tracking
+    │   ├── index.php              # Asset catalog, financial costs, PTR numbers, exports
+    │   ├── _asset_form.php        # Sectioned asset input partial
+    │   └── print.php              # Official printable Computer Unit Inventory Form
+    ├── maintenance/               # Preventive Maintenance (PM) Checklist & Inspection History
+    │   ├── index.php              # 22-point audit checklist, scoring engine, and logs
+    │   └── print.php              # Official printable Computer PM Checklist certificate
+    ├── routers/                   # Network Router inventory & status ping
+    ├── switches/                  # Network Switch & port management
+    ├── firewall/                  # Endpoint security & firewall compliance
+    ├── reconciliation/            # Compare & Sync: IP-to-Computer conflict resolution
+    ├── office/                    # Microsoft Office License assignment & key tracking
+    ├── printers/                  # Standalone printer inventory & departmental mapping
+    ├── pabx/                      # Hospital Telephone Directory & PABX extensions
+    ├── queueing_tv/               # OPD / Waiting Area Queue Display TV management
+    ├── ics/                       # Inventory Custodian Slip (ICS) tracking
+    ├── ihoms_links/               # Integrated Hospital Operations Management shortcuts
+    ├── reports/                   # Cross-module tabular reporting & bulk data dumps
+    ├── logs/                      # Audit trails, modification diffs, & actor tracking
+    ├── changelog/                 # File checksum differential change detector & version log
+    └── settings/                  # User accounts, passwords, & module permission matrices
 ```
 
 ---
@@ -98,641 +163,664 @@ HSNM/
 ## 4. Authentication & Session Management
 
 ### Login Flow (`login.php`)
-
-1. User submits username + password via POST.
-2. PHP queries `users` table: `SELECT * FROM users WHERE username = ?`
-3. `password_verify($input, $hash)` validates the bcrypt hash.
-4. On success, session stores:
-   - `$_SESSION['user_id']`
-   - `$_SESSION['username']`
-   - `$_SESSION['role']` → `'admin'` | `'editor'` | `'viewer'`
-   - `$_SESSION['module_access']` → JSON array of allowed module keys
-5. Redirect to `/HSNM/`.
+1. User enters username and password in the login gateway.
+2. The server queries `users` table: `SELECT * FROM users WHERE username = ?`.
+3. `password_verify($password, $user['password'])` evaluates the bcrypt hash.
+4. On success:
+   - `session_regenerate_id(true)` prevents session fixation attacks.
+   - Populates session variables:
+     - `$_SESSION['user_id']`
+     - `$_SESSION['username']`
+     - `$_SESSION['role']` (`admin`, `editor`, `viewer`)
+     - `$_SESSION['module_access']` (JSON array of permitted module slugs)
+     - `$_SESSION['last_activity'] = time()`
+5. Redirects to `BASE_URL . '/'`.
 
 ### Session Guard (`requireLogin()`)
-
-Every module starts with:
+Every module entry point invokes:
 ```php
-require_once '../../config.php';
+require_once __DIR__ . '/../../config.php';
 requireLogin();
 ```
+`requireLogin()` enforces:
+- Presence of `$_SESSION['user_id']`.
+- 30-minute idle session timeout:
+  ```php
+  if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > 1800)) {
+      session_unset();
+      session_destroy();
+      header("Location: " . BASE_URL . "/login?timeout=1");
+      exit;
+  }
+  $_SESSION['last_activity'] = time();
+  ```
+- Anti-caching HTTP headers:
+  ```php
+  header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+  header("Pragma: no-cache");
+  ```
 
-`requireLogin()` checks `$_SESSION['user_id']`; if absent, redirects to `/login`.
+---
 
-### Logout (`logout.php`)
+## 5. Front-End Layout & UI Architecture
 
-```php
-session_destroy();
-header("Location: /HSNM/login");
+### Responsive Desktop & Mobile Framework
+Every authenticated page renders a consistent, accessible two-column layout:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ SIDEBAR (fixed 256px)       │ MAIN CONTENT AREA (flex-1)    │
+│                             │ ┌───────────────────────────┐ │
+│ [Logo] HSNM v1.15.5         │ │ Top Facility Switcher Tabs│ │
+│ ─────────────────────────── │ └───────────────────────────┘ │
+│ Overview (Dashboard)        │ Top Control Bar:              │
+│ Routers                     │  - Module Title & Icon        │
+│ Switches                    │  - Action Buttons (Add/Export)│
+│ IP Addresses                │  - KPI Summary Badges         │
+│   ↳ JASMC-ST                │ ───────────────────────────── │
+│   ↳ JASMC-VT                │ Control Row:                  │
+│   ↳ DOH-JBL-CMC             │  - Live Search (Debounced)    │
+│ Computers                   │  - Dropdown Filters           │
+│   ↳ JASMC-ST                │  - Pagination (15/50/100/All) │
+│   ↳ JASMC-VT                │ ───────────────────────────── │
+│   ↳ DOH-JBL-CMC             │ Sticky-Header Data Table      │
+│ Asset Inventory             │ ───────────────────────────── │
+│ Maintenance (PM Suite)      │ Bottom Pagination & Footer    │
+│ Firewall Compliance         │                               │
+│ MS Office Licenses          │                               │
+│ Compare & Sync              │                               │
+│ ICS Inventory               │                               │
+│ PABX Directory              │                               │
+│ IS Links                    │                               │
+│ Printers                    │                               │
+│ Queueing TV                 │                               │
+│ Reports Engine              │                               │
+│ ─────────────────────────── │                               │
+│ Audit Logs                  │                               │
+│ Settings (Admin)            │                               │
+│ Changelog                   │                               │
+│ Data Sync (Neon Cloud)      │                               │
+│ ─────────────────────────── │                               │
+│ 🌙 Dark/Light Mode Switcher │                               │
+│ 👤 User Profile & Logout    │                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Dark / Light Mode Switching
+- Toggled by `toggleTheme()` in `assets/js/` and persisted in `localStorage.getItem('theme')`.
+- Embedded early in `<head>` via `includes/header.php` to eliminate "flash of unstyled content" (FOUC).
+
+---
+
+## 6. Role-Based Access Control (RBAC)
+
+User access is managed with granular flexibility:
+
+| Role | Operational Scope | Administrative Privileges |
+|---|---|---|
+| **Admin** | Full read, write, and delete across all modules | Access to User Settings, Role Assignment, Permission Matrices, Audit Logs, and Cloud Data Sync (`sync_neon.php`) |
+| **Editor** | Read, create, update, and export across permitted modules | Access to Audit Logs; no access to Settings, User Management, or Cloud Data Sync |
+| **Viewer** | Read-only search, view, and export across permitted modules | No editing, deleting, audit logs, or settings access |
+
+### Fine-Grained Module Matrix (`module_access`)
+Each user has a `module_access` JSONB column in `users`:
+```json
+["computers", "jasmc_st", "jasmc_vt", "doh_jbl_cmc", "assets", "maintenance", "ips", "ips_jasmc_st", "ips_jasmc_vt", "ips_doh_jbl_cmc", "routers", "switches", "office", "firewall"]
+```
+Admin users bypass checks. Staff and viewers have menu items and page access filtered strictly by `canAccessModule($slug)`.
+
+---
+
+## 7. Comprehensive Modules Walkthrough
+
+### 7.1 Executive Dashboard (`index.php`) & Query Isolation Architecture
+Acts as the central command center for hospital IT management:
+- **4-Metric Top Ribbon**: Displays Total Tracked Endpoints, Network IP Allocation %, Satellite Units deployed, and Cloud Sync Integrity.
+- **Query Isolation Architecture**:
+  ```php
+  $safeCount = function($sql, $default = 0) use ($pdo) {
+      if (!$pdo) return $default;
+      try {
+          $val = $pdo->query($sql)->fetchColumn();
+          return $val !== false ? (int)$val : $default;
+      } catch (Exception $e) {
+          return $default;
+      }
+  };
+  ```
+  This pattern isolates every metric query. A single schema update or missing column in one table never zeroes out or crashes the dashboard.
+
+---
+
+### 7.2 Central Computer Inventory (`modules/computers/`)
+The primary workstation inventory tracking all desktop computers and laptops in the central hospital facility.
+- **Lifecycle Statuses**:
+  - `Working` (Green badge): Operating normally.
+  - `Maintenance` (Yellow badge): Currently under inspection or repair.
+  - `Transferred` (Blue badge): Relocated to an external satellite facility.
+  - `Condemned` (Red badge): Decommissioned, damaged, or scrap.
+- **Sectioned Card Modals**:
+  Organized into 7 clear visual sections:
+  1. *General Information* (Building, Floor, Department, End User, MR/PAR, Control #, Status)
+  2. *System Unit* (Make/Model, System Unit S/N)
+  3. *Core Hardware Specs* (Processor, RAM Memory, Storage)
+  4. *Peripherals* (Monitor/SN, Mouse/SN, Keyboard/SN, Printer multi-select, Scanner, AVR/UPS)
+  5. *System & Software* (OS, OS Key, License, MS Office, Office Email)
+  6. *Network & Security* (IP Address, MAC Address, Endpoint Secure, Firewall)
+  7. *Personnel & Remarks* (Checked By, Encoded By, Remarks Date, Remarks text)
+- **Automated Workstation-to-Asset Hook**:
+  Every insert and update calls `syncComputerToAsset($pdo, $id)` in `config.php`, automatically upserting the workstation into `assets`.
+
+---
+
+### 7.3 Multi-Facility Satellite Computers (`jasmc_st`, `jasmc_vt`, `doh_jbl_cmc`)
+- **`JASMC-ST`** (`/modules/jasmc_st/` -> `computers_jasmc_st`) &mdash; Sto. Tomas Branch
+- **`JASMC-VT`** (`/modules/jasmc_vt/` -> `computers_jasmc_vt`) &mdash; Victoria Tarlac Branch
+- **`DOH-JBL-CMC`** (`/modules/doh_jbl_cmc/` -> `computers_doh_jbl_cmc`) &mdash; Children's Medical Center
+- **Automated Transfer Protocol**:
+  - Setting a computer to `Transferred` triggers the transfer modal.
+  - Confirming the destination clones the machine into the target satellite table with status `Working` and populates `source_computer_id`.
+  - The central machine is marked `Transferred` with a destination badge (`→ Transferred to: <FACILITY>`).
+
+---
+
+### 7.4 Hospital & Satellite IP Address Management
+- **Central Hospital IP Space** (`/modules/ips/` -> `ips` table): Tracks IPv4 address space across hospital subnets.
+- **Satellite IP Subsystems**:
+  - `modules/ips_jasmc_st/` -> `ips_jasmc_st`
+  - `modules/ips_jasmc_vt/` -> `ips_jasmc_vt`
+  - `modules/ips_doh_jbl_cmc/` -> `ips_doh_jbl_cmc`
+- **Unified Switcher Tabs**: `includes/satellite_ip_tabs.php` renders real-time count badges across all four facilities.
+- **Non-ICMP Discovery**: When Windows Firewall blocks ping packets, HSNM's network engine automatically queries ARP, NBTSTAT, and GETMAC scrapers to detect active devices.
+
+---
+
+### 7.5 Capital Asset Registry (`modules/assets/`)
+Tracks capital equipment, property valuations, and Property Transfer Receipts (PTR).
+- **One-Click Sync Runner** (`run_computers_to_assets_sync.php`):
+  - Web migration runner accessible directly from the header before Export Excel.
+  - Executes transactional upsert of 872 workstations into `assets` and seeds 574 historical PMS audit logs into `maintenance`.
+- **Printable Inventory Form** (`modules/assets/print.php`):
+  - Formats selected assets into the official Computer Unit Inventory Form ready for property audit filing.
+
+---
+
+### 7.6 Preventive Maintenance (PM) Suite (`modules/maintenance/`)
+A standardized 22-point digital inspection checklist replacing manual paperwork:
+- **11-Point Hardware Audit**: Monitor, Motherboard/Interior, Power Supply/AVR, Video Card, Hard Disk S.M.A.R.T., CD-ROM, LAN Card, Keyboard/Mouse, Printer/Scanner, UPS/AVR, Modem/Ports.
+- **11-Point Software Audit**: Disk Defragmentation/TRIM, Registry Health, Antivirus Definitions, OS Patches, Recycle Bin, Temporary Files, Unauthorized Software, OS Integrity, Office License, Cloud Backup, Browser Cache.
+- **Real-Time Performance Score**:
+  $$\text{Score} = \left( \frac{\text{Passed Checks}}{\text{Applicable Checks}} \right) \times 100$$
+- **Official Print Certificate** (`modules/maintenance/print.php`):
+  - Formats completed inspections into official Computer Preventive Maintenance Checklist sheets with dual technician and supervisor sign-off.
+
+---
+
+### 7.7 Network Hardware: Routers & Switches
+- **Routers (`modules/routers/`)**: Catalogs core routers, WAN circuits, LAN gateways, SSID/passwords, and online ping status.
+- **Switches (`modules/switches/`)**: Tracks switch models, port densities, VLAN allocations, management IPs, and rack locations.
+
+---
+
+### 7.8 Reconciliation Engine (`modules/reconciliation/`)
+An automated audit tool comparing the **IP Address Inventory** against the **Computer Inventory**:
+- **Data Mismatches**: Workstations sharing a control number but having divergent IP or MAC addresses.
+- **Identity Conflicts**: Duplicate IP or MAC addresses claimed by two differing control numbers.
+- **One-Click Synchronization**: Pushes computer specs to IP records or pulls verified IP details into computers.
+
+---
+
+### 7.9 Software Licensing: Microsoft Office (`modules/office/`)
+- Catalogs Office 2016, 2019, 2021, and Microsoft 365 ProPlus licenses.
+- Tracks product keys and assigned `@hospital.gov.ph` user accounts.
+- Automatically creates or updates license records when Office details are entered in Computer Inventory.
+
+---
+
+### 7.10 Endpoint Security & Firewall Compliance (`modules/firewall/`)
+- Monitors antivirus engine status (Athena EPP, Windows Defender).
+- Tracks firewall active status across all workstation endpoints with live AJAX toggles.
+
+---
+
+### 7.11 Hospital Auxiliaries (Printers, PABX, Queueing TV, ICS, Links)
+- **Printers (`modules/printers/`)**: Standalone printer inventory tracking toner models and serial numbers.
+- **PABX Directory (`modules/pabx/`)**: Hospital telephone extension directory with fast search by name, department, or floor.
+- **Queueing TV (`modules/queueing_tv/`)**: Manages TV display displays and queue numbering for outpatient lobbies.
+- **ICS Inventory (`modules/ics/`)**: Generates and prints official Inventory Custodian Slips for tangible property.
+- **iHOMS Links (`modules/ihoms_links/`)**: Central bookmark launchpad for internal medical portals and lab systems.
+
+---
+
+### 7.12 Administration, Auditing & Reports (Logs, Settings, Changelog, Reports)
+- **Reports (`modules/reports/`)**: Cross-tabular analytics by department, building, floor, and hardware specs.
+- **Audit Logs (`modules/logs/`)**: Complete audit trail showing who made changes, the exact before-and-after diffs, and IP addresses.
+- **Changelog (`modules/changelog/`)**: Displays active system version (`v1.15.5`) and tracks codebase modifications using MD5 checksum scans.
+- **Settings (`modules/settings/`)**: User management, password resets, role assignment, and JSONB module permissions.
+
+---
+
+### 7.13 Cloud Database Synchronization Engine 2.0 (`sync_neon.php`)
+Connects local PostgreSQL with remote Neon Serverless PostgreSQL for off-site backup:
+- **Dynamic Table Discovery**: Queries `information_schema.tables` on both local and remote endpoints to detect table availability dynamically.
+- **Column Intersection & Type Casting**: Inspects `information_schema.columns` to build intersection sets of matching columns. Automatically maps and binds data types (booleans, timestamps, numbers, JSONB).
+- **Match-Key Conflict Resolution**: For tables with natural keys (e.g., `control_number`, `ip_address`, `username`, `control_id`), updates existing rows using `match` columns to resolve unique constraint collisions.
+- **Bi-Directional Deletion Reconciliation**: Tracks deleted rows using a max ID watermark heuristic. When enabled via the **Allow Deletion Sync** option, rows purged locally are safely purged on the remote instance.
+- **Full 22-Table Coverage**: Synchronizes all inventory, satellite, licensing, and configuration tables in topological dependency order.
+
+---
+
+## 8. Database Schema & Data Dictionary (All 22 Tables)
+
+### Summary of System Tables
+
+```sql
+-- 1. users
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100),
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100),
+    role VARCHAR(20) CHECK (role IN ('admin','editor','viewer')),
+    is_active BOOLEAN DEFAULT TRUE,
+    module_access JSONB,
+    last_login TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. computers (Central Workstation Inventory)
+CREATE TABLE computers (
+    id SERIAL PRIMARY KEY,
+    department VARCHAR(100),
+    end_user VARCHAR(100),
+    mr_par VARCHAR(100),
+    control_number VARCHAR(100) UNIQUE,
+    system_unit VARCHAR(100),
+    system_unit_sn VARCHAR(100),
+    monitor VARCHAR(100),
+    monitor_sn VARCHAR(100),
+    mouse VARCHAR(100),
+    mouse_sn VARCHAR(100),
+    keyboard VARCHAR(100),
+    keyboard_sn VARCHAR(100),
+    printer VARCHAR(100),
+    printer_sn VARCHAR(100),
+    scanner VARCHAR(100),
+    scanner_sn VARCHAR(100),
+    avr_ups VARCHAR(100),
+    avr_ups_sn VARCHAR(100),
+    processor VARCHAR(200),
+    memory VARCHAR(100),
+    storage VARCHAR(100),
+    os VARCHAR(100),
+    license CHAR(1) CHECK (license IN ('Y','N')),
+    microsoft_office VARCHAR(100),
+    ms_office_email VARCHAR(100),
+    os_product_key VARCHAR(255),
+    ip_address VARCHAR(45),
+    mac_address VARCHAR(17),
+    endpoint_secure CHAR(1) CHECK (endpoint_secure IN ('Y','N')),
+    firewall CHAR(1) CHECK (firewall IN ('Y','N')),
+    status VARCHAR(100) DEFAULT 'Working',
+    transferred_to VARCHAR(100),
+    checked_by VARCHAR(100),
+    encoded_by VARCHAR(100),
+    remarks TEXT,
+    remarks_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3, 4, 5. Satellite Computer Tables (computers_jasmc_st, computers_jasmc_vt, computers_doh_jbl_cmc)
+-- Replicate computers schema + source_computer_id INTEGER, transferred_at TIMESTAMP
+
+-- 6. assets (Capital Asset Registry)
+CREATE TABLE assets (
+    id SERIAL PRIMARY KEY,
+    control_id VARCHAR(50) UNIQUE,
+    department VARCHAR(100),
+    end_user VARCHAR(100),
+    source VARCHAR(20) DEFAULT 'Purchased',
+    mr_ics VARCHAR(50),
+    item_code VARCHAR(50),
+    cost NUMERIC(12,2),
+    brand_model VARCHAR(150),
+    serial_number VARCHAR(100),
+    ptr_number VARCHAR(50),
+    processor VARCHAR(100),
+    memory VARCHAR(50),
+    storage VARCHAR(50),
+    gpu VARCHAR(100),
+    monitor VARCHAR(100),
+    monitor_sn VARCHAR(100),
+    printer VARCHAR(100),
+    printer_sn VARCHAR(100),
+    ups_avr VARCHAR(100),
+    ups_avr_sn VARCHAR(100),
+    keyboard_mouse VARCHAR(100),
+    os_version VARCHAR(100),
+    os_licensed BOOLEAN DEFAULT FALSE,
+    ip_address VARCHAR(45),
+    mac_address VARCHAR(17),
+    ms_office VARCHAR(100),
+    ms_office_licensed BOOLEAN DEFAULT FALSE,
+    antivirus VARCHAR(100),
+    scan_date DATE,
+    status VARCHAR(100) DEFAULT 'Active',
+    remarks TEXT,
+    encoded_by VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 7. maintenance (Preventive Maintenance Checklist)
+CREATE TABLE maintenance (
+    id SERIAL PRIMARY KEY,
+    asset_id INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+    computer_id INTEGER REFERENCES computers(id) ON DELETE SET NULL,
+    department VARCHAR(100),
+    employee_name VARCHAR(100),
+    control_number VARCHAR(50),
+    processor VARCHAR(100),
+    memory VARCHAR(50),
+    gpu VARCHAR(100),
+    maintenance_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    status VARCHAR(30) DEFAULT 'Completed',
+    performance_score INTEGER DEFAULT 100,
+    -- 11 Hardware Checkpoints (Pass/Fail/N/A) + Remarks
+    hw_monitor VARCHAR(10) DEFAULT 'Pass', hw_monitor_remarks TEXT,
+    hw_motherboard VARCHAR(10) DEFAULT 'Pass', hw_motherboard_remarks TEXT,
+    hw_power_supply VARCHAR(10) DEFAULT 'Pass', hw_power_supply_remarks TEXT,
+    hw_video_card VARCHAR(10) DEFAULT 'Pass', hw_video_card_remarks TEXT,
+    hw_hard_disk VARCHAR(10) DEFAULT 'Pass', hw_hard_disk_remarks TEXT,
+    hw_cdrom VARCHAR(10) DEFAULT 'N/A', hw_cdrom_remarks TEXT,
+    hw_lan_card VARCHAR(10) DEFAULT 'Pass', hw_lan_card_remarks TEXT,
+    hw_keyboard_mouse VARCHAR(10) DEFAULT 'Pass', hw_keyboard_remarks TEXT,
+    hw_printer_scanner VARCHAR(10) DEFAULT 'N/A', hw_printer_remarks TEXT,
+    hw_ups_avr VARCHAR(10) DEFAULT 'Pass', hw_ups_avr_remarks TEXT,
+    hw_modem VARCHAR(10) DEFAULT 'N/A', hw_modem_remarks TEXT,
+    -- 11 Software Checkpoints (Pass/Fail/N/A) + Remarks
+    sw_defrag VARCHAR(10) DEFAULT 'Pass', sw_defrag_remarks TEXT,
+    sw_registry VARCHAR(10) DEFAULT 'Pass', sw_registry_remarks TEXT,
+    sw_antivirus VARCHAR(10) DEFAULT 'Pass', sw_antivirus_remarks TEXT,
+    sw_os_patch VARCHAR(10) DEFAULT 'Pass', sw_os_patch_remarks TEXT,
+    sw_recycle_bin VARCHAR(10) DEFAULT 'Pass', sw_recycle_remarks TEXT,
+    sw_temp_files VARCHAR(10) DEFAULT 'Pass', sw_temp_remarks TEXT,
+    sw_installed VARCHAR(10) DEFAULT 'Pass', sw_installed_remarks TEXT,
+    sw_os_integrity VARCHAR(10) DEFAULT 'Pass', sw_integrity_remarks TEXT,
+    sw_office VARCHAR(10) DEFAULT 'Pass', sw_office_remarks TEXT,
+    sw_cloud_backup VARCHAR(10) DEFAULT 'N/A', sw_backup_remarks TEXT,
+    sw_browser_cache VARCHAR(10) DEFAULT 'Pass', sw_browser_remarks TEXT,
+    -- Narrative & Sign-Off
+    env_observations TEXT,
+    action_taken TEXT,
+    recommendation TEXT,
+    checked_by VARCHAR(100),
+    verified_by VARCHAR(100),
+    audit_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 8, 9, 10, 11. IP Address Tables (ips, ips_jasmc_st, ips_jasmc_vt, ips_doh_jbl_cmc)
+CREATE TABLE ips (
+    id SERIAL PRIMARY KEY,
+    ip_address VARCHAR(50) UNIQUE NOT NULL,
+    mac_address VARCHAR(50),
+    hostname VARCHAR(255),
+    control_number VARCHAR(100),
+    department VARCHAR(255),
+    location VARCHAR(255),
+    om_name VARCHAR(255),
+    status VARCHAR(50) DEFAULT 'available',
+    device_type VARCHAR(50) DEFAULT 'Workstation',
+    description TEXT,
+    subnet_id INTEGER,
+    remarks TEXT,
+    last_seen TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 12. subnets
+CREATE TABLE subnets (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100),
+    network VARCHAR(50),
+    cidr VARCHAR(20),
+    gateway VARCHAR(50),
+    vlan_id INT,
+    description TEXT,
+    location VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 13. routers
+CREATE TABLE routers (
+    id SERIAL PRIMARY KEY,
+    serial_number VARCHAR(50) NOT NULL,
+    brand VARCHAR(100) NOT NULL,
+    location VARCHAR(100),
+    ip_address VARCHAR(45),
+    mac_address VARCHAR(17),
+    lan_ip VARCHAR(45),
+    ssid VARCHAR(100),
+    wifi_password VARCHAR(100),
+    admin_user VARCHAR(100),
+    admin_password VARCHAR(100),
+    status VARCHAR(50),
+    firmware_status VARCHAR(50),
+    uptime VARCHAR(50),
+    remarks TEXT,
+    last_seen TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 14. switches
+CREATE TABLE switches (
+    id SERIAL PRIMARY KEY,
+    switch_id VARCHAR(50) UNIQUE NOT NULL,
+    model VARCHAR(100),
+    manufacturer VARCHAR(100),
+    serial VARCHAR(100) UNIQUE,
+    ip_address VARCHAR(45),
+    mac_address VARCHAR(17),
+    building_location VARCHAR(200),
+    floor VARCHAR(20),
+    ports VARCHAR(100),
+    port_details VARCHAR(200),
+    ports_status VARCHAR(50),
+    status VARCHAR(50) DEFAULT 'Active',
+    personnel VARCHAR(100),
+    last_maintenance DATE,
+    next_maintenance VARCHAR(50),
+    remarks TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 15. firewall_status
+CREATE TABLE firewall_status (
+    id SERIAL PRIMARY KEY,
+    control_number VARCHAR(100) UNIQUE NOT NULL,
+    status VARCHAR(10) DEFAULT 'No',
+    last_edited_by VARCHAR(100),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 16. office_licenses
+CREATE TABLE office_licenses (
+    id SERIAL PRIMARY KEY,
+    control_number VARCHAR(100),
+    email VARCHAR(100),
+    license_type VARCHAR(100),
+    product_key VARCHAR(255),
+    assigned_to VARCHAR(100),
+    department VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 17. ics_inventory
+CREATE TABLE ics_inventory (
+    id SERIAL PRIMARY KEY,
+    article VARCHAR(200),
+    description TEXT,
+    property_number VARCHAR(100),
+    serial_number VARCHAR(100),
+    unit_of_measure VARCHAR(50),
+    unit_value DECIMAL(12,2),
+    quantity INT,
+    total_value DECIMAL(12,2),
+    date_issued DATE,
+    end_user VARCHAR(100),
+    department VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 18. printers
+CREATE TABLE printers (
+    id SERIAL PRIMARY KEY,
+    printer_no VARCHAR(100) UNIQUE,
+    brand VARCHAR(100),
+    model VARCHAR(100),
+    serial_number VARCHAR(100),
+    department VARCHAR(100),
+    status VARCHAR(50),
+    remarks TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 19. queueing_tvs
+CREATE TABLE queueing_tvs (
+    id SERIAL PRIMARY KEY,
+    window_name VARCHAR(100),
+    queue_number INT,
+    status VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 20. pabx_directory
+CREATE TABLE pabx_directory (
+    id SERIAL PRIMARY KEY,
+    local_number VARCHAR(50) UNIQUE NOT NULL,
+    ip_address VARCHAR(45),
+    department VARCHAR(100),
+    building VARCHAR(100) NOT NULL,
+    floor VARCHAR(10) NOT NULL,
+    display_name VARCHAR(200) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 21. ihoms_links
+CREATE TABLE ihoms_links (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(150) NOT NULL,
+    url TEXT NOT NULL,
+    category VARCHAR(100),
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 22. audit_logs
+CREATE TABLE audit_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(id) ON DELETE SET NULL,
+    username VARCHAR(100),
+    action VARCHAR(50),
+    details TEXT,
+    category VARCHAR(50),
+    target_id INT,
+    ip_address VARCHAR(45),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
 ---
 
-## 5. Front-End Layout
+## 9. Back-End Architectural Patterns
 
-### Page Structure
+### Standard Module Controller Pattern
+Every module index follows this structured execution sequence:
+1. Initialize configuration and enforce authentication (`requireLogin()`).
+2. Validate CSRF token on POST actions (`verifyCsrfToken($_POST['csrf_token'])`).
+3. Handle state mutation (Insert, Update, Delete) with parameterized queries.
+4. Log action to audit trail (`logAudit($pdo, ...)`).
+5. Extract GET filters, perform search sanitization, and compute pagination offsets.
+6. Execute filtered SELECT query with bound parameters.
+7. Render `header.php`, `sidebar.php`, content view, and `footer.php`.
 
-Every authenticated page follows this layout:
-
-```
-┌──────────────────────────────────────────────────────┐
-│ SIDEBAR (fixed, 256px)      │  MAIN CONTENT (flex-1) │
-│                             │  ┌──────────────────┐  │
-│  Logo + App Name            │  │ Sticky Header     │  │
-│  ─────────────────          │  │ (Title + Actions) │  │
-│  Overview (Dashboard)       │  └──────────────────┘  │
-│  Routers                    │  Stats Cards (3-grid)   │
-│  Switches                   │  Control Bar:           │
-│  IP Addresses               │   Row 1: Sort + Pag.   │
-│  Computers                  │   Row 2: Search+Filter  │
-│  MS Office                  │  Data Table             │
-│  Compare & Sync             │  Bottom Pagination      │
-│  ICS Inventory              │                         │
-│  PABX Directory             │                         │
-│  IS Links                   │                         │
-│  Printers                   │                         │
-│  Queueing TV                │                         │
-│  ─────────────────          │                         │
-│  Audit Logs                 │                         │
-│  Settings (admin)           │                         │
-│  Changelog                  │                         │
-│  ─────────────────          │                         │
-│  🌙 Dark/Light toggle       │                         │
-│  👤 Username + Logout       │                         │
-└──────────────────────────────────────────────────────┘
-```
-
-### Control Bar Pattern (all table modules)
-
-```
-Row 1 (right-aligned):  [Sort ▾]  [Page X of Y]  [‹]  [›]  [Show: 50 ▾]
-Row 2 (left-aligned):   [🔍 Search...]  [Filter ▾]  [Filter ▾]  ...
-```
-
-Both rows use `flex-wrap` so they collapse neatly on smaller screens.
-
-### Dark Mode
-
-Toggled by JavaScript via `document.documentElement.classList.toggle('dark')`. State saved to `localStorage`. The sidebar has a toggle button at the bottom. Default preference is controlled by the `dark_mode` setting in the `settings` table.
-
-### Modals
-
-Add/Edit/Delete confirmations use custom `toggleModal(id)` JavaScript:
-```js
-function toggleModal(id) {
-    document.getElementById(id).classList.toggle('hidden');
+### Cross-Table Replication & Hook Pattern
+```php
+function syncComputerToAsset($pdo, $computer_id) {
+    if (!$computer_id) return;
+    try {
+        $stmt = $pdo->prepare("
+            INSERT INTO assets (control_id, department, end_user, brand_model, serial_number, processor, memory, storage, status, ...)
+            SELECT control_number, department, end_user, system_unit, system_unit_sn, processor, memory, storage, ...
+            FROM computers WHERE id = ?
+            ON CONFLICT (control_id) DO UPDATE SET
+                department = EXCLUDED.department,
+                end_user = EXCLUDED.end_user,
+                updated_at = NOW()
+        ");
+        $stmt->execute([$computer_id]);
+    } catch (Exception $e) {}
 }
 ```
 
----
-
-## 6. Role-Based Access Control
-
-### Roles
-
-| Role | Capabilities |
-|---|---|
-| `admin` | Full access — all modules, Settings, Audit Logs, user management |
-| `editor` | CRUD on all inventory modules; can view Audit Logs; no Settings |
-| `viewer` | Read-only access to permitted modules; no Audit Logs; no Settings |
-
-### Module-Level Permissions
-
-Each user has a `module_access` JSON column (e.g. `["computers","ips","pabx"]`). The sidebar and each module check:
-
+### Formula Injection Escaping in CSV Exports
+To protect against CSV/Excel formula injection (CWE-1236):
 ```php
-function canAccessModule($module) {
-    $allowed = json_decode($_SESSION['module_access'], true);
-    return in_array($module, $allowed);
-}
-```
-
-If `module_access` is `null`, all modules are accessible (backward-compatible default).
-
----
-
-## 7. Modules Overview
-
-### 7.1 Overview / Dashboard (`index.php`)
-
-Aggregates live stats from all tables:
-- Total computers, routers, switches, IPs, PABX entries, printers
-- Recent audit log entries displayed as activity feed
-
-### 7.2 Routers (`modules/routers/`)
-
-Manages network routers.
-
-**Key fields:** serial number, brand, IP, MAC, LAN IP, SSID, WiFi password, admin credentials, status, firmware status, uptime, remarks.
-
-**Statuses:** Online · Offline · Warning · High Latency · Power Fail · Maintenance
-
-**Features:** Add/Edit/Delete, status badges with color coding, Export CSV.
-
-### 7.3 Switches (`modules/switches/`)
-
-Manages network switches.
-
-**Key fields:** Switch ID, model, manufacturer, serial, IP, MAC, building+floor location, ports, port details, status, last/next maintenance, personnel.
-
-**Statuses:** Active · Maintenance · Inactive
-
-**Features:** Add/Edit/Delete, maintenance scheduling, Export CSV.
-
-### 7.4 IP Address Management (`modules/ips/`)
-
-Tracks all IP addresses with subnet awareness.
-
-**Key fields:** IP address, MAC, hostname, control number, department, OM name, status, device type, subnet, remarks.
-
-**Statuses:** active · reserved · conflict · static · offline
-
-**Features:** Duplicate IP detection (ignores "obtain"/"wifi" strings), subnet filtering, Export CSV, Print.
-
-### 7.5 Computer Inventory (`modules/computers/`) ⭐ Primary Module
-
-The most feature-rich module.
-
-**Key fields (per computer):**
-- **Assignment:** department, end user, MR/PAR number, control number
-- **Peripherals + S/N:** system unit, monitor, mouse, keyboard, printer, scanner, AVR/UPS
-- **Specs:** processor, memory, storage
-- **Software:** OS, OS product key, license (Y/N), MS Office version, MS Office email
-- **Network:** IP address, MAC address, Endpoint Secure (Y/N)
-- **Accountability:** checked by, encoded by, remarks
-
-**Features:**
-- Multi-filter: Department, Printer, Memory, OS, MS Office, Checked By
-- Full-text AJAX search across 30+ fields
-- Sort + Pagination (top-right row) / Search+Filters (bottom row)
-- Export selected rows to CSV
-- Import from CSV (duplicate detection)
-- Print selected records
-- CSRF-protected add/edit/delete
-
-### 7.6 MS Office Licenses (`modules/office/`)
-
-Dedicated tracking for Office 365 / volume licenses.
-
-Synced with the `computers` table: when a `computers` record's `ms_office_email` is updated, the linked `office_licenses` record auto-updates.
-
-### 7.7 Compare & Sync (`modules/reconciliation/`)
-
-Cross-references IP inventory (`ips`) vs Computer inventory (`computers`) by `control_number`.
-
-Highlights:
-- IPs in `ips` with no matching computer
-- Computers with IP addresses not registered in `ips`
-- Mismatched data (department, hostname, etc.)
-
-### 7.8 ICS Inventory (`modules/ics/`)
-
-Generates printable **Inventory Custodian Slips** (ICS) — an official government inventory document format.
-
-**Features:**
-- Form-based entry with property details, serial numbers, acquisition cost, date issued
-- `print_form.php` renders a print-optimized HTML layout
-- Print CSS hides UI chrome (sidebar, buttons)
-
-### 7.9 PABX Directory (`modules/pabx/`)
-
-Hospital telephone extension directory.
-
-**Key fields:** local number (unique), IP address, department, building, floor, display name.
-
-**Features:**
-- Building + Floor filters
-- Import/Export CSV
-- Print view with feature code reference table (call transfer, forward, conference codes)
-
-### 7.10 IS Links (`modules/ihoms_links/`)
-
-Quick-access bookmark manager for internal systems (iHOMS, HIS portals, etc.).
-
-Simple URL + label + category list. Acts as a staff intranet link hub.
-
-### 7.11 Printers (`modules/printers/`)
-
-Standalone printer asset tracking separate from the computer-attached printers in the Computers module.
-
-**Key fields:** printer model, brand, serial number, location, department, status, remarks.
-
-**Features:** Add/Edit/Delete, print selected records (checkbox + print), Export CSV.
-
-### 7.12 Queueing TV (`modules/queueing_tv/`)
-
-Manages a hospital queue display system shown on TV screens.
-
-Controls queue numbers and window assignments displayed on a separate public-facing `queueing_tv` page.
-
-### 7.13 Audit Logs (`modules/logs/`)
-
-Viewable by admin and editor roles only.
-
-Displays all actions logged via `logAudit()`:
-- Who performed the action (user_id + username)
-- Action type (e.g. `add_computer`, `delete_pabx`, `login`)
-- Details (full record snapshot)
-- Resource type + ID
-- IP address of the actor
-- Timestamp
-
-### 7.14 Settings (`modules/settings/`)
-
-Admin-only user management:
-- Create / edit / deactivate users
-- Assign roles (admin · editor · viewer)
-- Set per-user module access (JSON array)
-- Change passwords (bcrypt hashed)
-
-### 7.15 Changelog (`modules/changelog/`)
-
-Displays the system version history. Entries are auto-created by `logChangelog()` calls in module actions (currently disabled/removed in most places to reduce noise — entries can still be added manually via SQL).
-
----
-
-## 8. Database Schema
-
-**Database:** `unified_network_inventory` (PostgreSQL)
-**Connection:** PDO with persistent connections, exception mode enabled.
-
----
-
-### `users`
-
-```sql
-id          SERIAL PRIMARY KEY
-username    VARCHAR(50) UNIQUE NOT NULL
-email       VARCHAR(100)
-password    VARCHAR(255) NOT NULL        -- bcrypt hash
-full_name   VARCHAR(100)
-role        VARCHAR(20) CHECK IN ('admin','editor','viewer')
-is_active   BOOLEAN DEFAULT TRUE
-module_access TEXT                        -- JSON array e.g. '["computers","ips"]'
-last_login  TIMESTAMP
-created_at  TIMESTAMP
-updated_at  TIMESTAMP
-```
-
----
-
-### `settings`
-
-```sql
-id            SERIAL PRIMARY KEY
-setting_key   VARCHAR(100) UNIQUE
-setting_value TEXT
-description   TEXT
-updated_at    TIMESTAMP
-```
-
-Default records: `system_name = 'HSNM'`, `dark_mode = '1'`
-
----
-
-### `audit_logs`
-
-```sql
-id            SERIAL PRIMARY KEY
-user_id       INT → users(id) ON DELETE SET NULL
-action_type   VARCHAR(50)     -- e.g. 'add_computer', 'login', 'delete_pabx'
-details       TEXT            -- human-readable snapshot
-resource_type VARCHAR(50)     -- 'computer', 'pabx', 'system', etc.
-resource_id   INT
-ip_address    VARCHAR(45)
-created_at    TIMESTAMP
-```
-
-Indexes: `created_at`, `action_type`, `(user_id, created_at)`
-
----
-
-### `routers`
-
-```sql
-id              SERIAL PRIMARY KEY
-serial_number   VARCHAR(50) NOT NULL
-brand           VARCHAR(100) NOT NULL
-location        VARCHAR(100)
-ip_address      VARCHAR(45)
-mac_address     VARCHAR(17)
-lan_ip          VARCHAR(45)
-ssid, wifi_password, admin_user, admin_password VARCHAR(100)
-status          CHECK IN ('Online','Offline','Warning','High Latency','Power Fail','Maintenance')
-firmware_status CHECK IN ('Up to Date','Update Available','Critical Update')
-uptime          VARCHAR(50)
-remarks         TEXT
-last_seen, created_at TIMESTAMP
-```
-
----
-
-### `switches`
-
-```sql
-id                SERIAL PRIMARY KEY
-switch_id         VARCHAR(50) UNIQUE NOT NULL
-model, manufacturer VARCHAR(100)
-serial            VARCHAR(100) UNIQUE
-ip_address        VARCHAR(45)
-mac_address       VARCHAR(17)
-building_location VARCHAR(200)
-floor             VARCHAR(20)
-ports, port_details, ports_status VARCHAR(100/200/50)
-status            CHECK IN ('Active','Maintenance','Inactive')
-personnel         VARCHAR(100)
-last_maintenance  DATE
-next_maintenance  VARCHAR(50)
-remarks           TEXT
-created_at, updated_at TIMESTAMP
-```
-
----
-
-### `subnets`
-
-```sql
-id          SERIAL PRIMARY KEY
-name        VARCHAR(100)
-network     VARCHAR(50)
-cidr        VARCHAR(20)
-gateway     VARCHAR(50)
-vlan_id     INT
-description TEXT
-location    VARCHAR(100)
-created_at  TIMESTAMP
-```
-
----
-
-### `ips`
-
-```sql
-id             SERIAL PRIMARY KEY
-ip_address     VARCHAR(50) UNIQUE NOT NULL
-mac_address    VARCHAR(17)
-hostname       VARCHAR(255)
-control_number VARCHAR(100)
-department     VARCHAR(100)
-om_name        VARCHAR(100)
-status         CHECK IN ('active','reserved','conflict','static','offline')
-device_type    VARCHAR(50)
-description    TEXT
-subnet_id      INT → subnets(id) ON DELETE SET NULL
-remarks        TEXT
-last_seen      TIMESTAMP
-created_at     TIMESTAMP
-```
-
-Indexes: `control_number`, `mac_address`, `status`, `(control_number, ip_address)`
-
----
-
-### `computers`
-
-```sql
-id              SERIAL PRIMARY KEY
-department      VARCHAR(100)
-end_user        VARCHAR(100)
-mr_par          VARCHAR(100)
-control_number  VARCHAR(100)
--- Peripherals (model + S/N pairs):
-system_unit, system_unit_sn   VARCHAR(100)
-monitor, monitor_sn           VARCHAR(100)
-mouse, mouse_sn               VARCHAR(100)
-keyboard, keyboard_sn         VARCHAR(100)
-printer, printer_sn           VARCHAR(100)
-scanner, scanner_sn           VARCHAR(100)
-avr_ups, avr_ups_sn           VARCHAR(100)
--- Specs:
-processor       VARCHAR(200)
-memory          VARCHAR(100)
-storage         VARCHAR(100)
--- Software:
-os              VARCHAR(100)
-license         CHAR(1) CHECK IN ('Y','N')
-microsoft_office VARCHAR(100)
-ms_office_email  VARCHAR(100)
-os_product_key  VARCHAR(255)
--- Network:
-ip_address      VARCHAR(45)
-mac_address     VARCHAR(17)
-endpoint_secure CHAR(1) CHECK IN ('Y','N')
--- Accountability:
-checked_by      VARCHAR(100)
-encoded_by      VARCHAR(100)
-remarks         TEXT
-created_at, updated_at TIMESTAMP
-```
-
-Indexes: `control_number`, `ip_address`, `mac_address`, `(control_number, ip_address)`
-
----
-
-### `pabx_directory`
-
-```sql
-id           SERIAL PRIMARY KEY
-local_number VARCHAR(50) UNIQUE NOT NULL
-ip_address   VARCHAR(45)
-department   VARCHAR(100)
-building     VARCHAR(100) NOT NULL
-floor        VARCHAR(10) NOT NULL
-display_name VARCHAR(200) NOT NULL
-created_at, updated_at TIMESTAMP
-```
-
-Indexes: `local_number`, `building`, `department`, `ip_address`, `display_name`, `floor`
-
----
-
-### `office_licenses`
-
-```sql
-id              SERIAL PRIMARY KEY
-control_number  VARCHAR(100)
-email           VARCHAR(100)    -- synced from computers.ms_office_email
-license_type    VARCHAR(100)
-product_key     VARCHAR(255)
-assigned_to     VARCHAR(100)
-department      VARCHAR(100)
-created_at, updated_at TIMESTAMP
-```
-
----
-
-### `printers` (standalone)
-
-```sql
-id           SERIAL PRIMARY KEY
-brand        VARCHAR(100)
-model        VARCHAR(100)
-serial_number VARCHAR(100)
-location_id  INT → locations(id)
-department   VARCHAR(100)
-status       VARCHAR(50)
-remarks      TEXT
-created_at   TIMESTAMP
-```
-
----
-
-### `changelog`
-
-```sql
-id          SERIAL PRIMARY KEY
-version     VARCHAR(20)         -- e.g. '1.4.23'
-change_date DATE
-change_type VARCHAR(50)         -- 'feature','bugfix','enhancement'
-module      VARCHAR(100)
-title       VARCHAR(255)
-description TEXT
-```
-
----
-
-### `ics_items`
-
-```sql
-id              SERIAL PRIMARY KEY
-article         VARCHAR(200)      -- item name
-description     TEXT
-property_number VARCHAR(100)
-serial_number   VARCHAR(100)
-unit_of_measure VARCHAR(50)
-unit_value      DECIMAL(12,2)
-quantity        INT
-total_value     DECIMAL(12,2)
-date_issued     DATE
-end_user        VARCHAR(100)
-department      VARCHAR(100)
-created_at      TIMESTAMP
-```
-
----
-
-### `queueing_tv` (queue management)
-
-```sql
-id          SERIAL PRIMARY KEY
-window_name VARCHAR(100)
-queue_number INT
-status      VARCHAR(50)
-created_at  TIMESTAMP
-```
-
----
-
-## 9. Back-End Patterns
-
-### Standard Module Pattern
-
-Every module's `index.php` follows this structure:
-
-```php
-<?php
-require_once '../../config.php';
-requireLogin();
-
-// 1. Handle POST actions (add / edit / delete)
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!verifyCsrfToken($_POST['csrf_token'])) { die(); }
-    // ... switch on $_POST['action']
-    logAudit($pdo, 'action_name', 'detail string', 'resource_type', $id);
-}
-
-// 2. Build WHERE clause from GET filters
-$search = $_GET['search'] ?? '';
-$filter = $_GET['filter'] ?? 'All';
-// ... build $where_clauses[], $params[]
-
-// 3. Pagination
-$page  = max(1, (int)($_GET['page'] ?? 1));
-$limit = ($_GET['limit'] === 'all') ? 999999 : (int)$_GET['limit'];
-$total_pages = ceil($total_items / $limit);
-
-// 4. Query
-$sql = "SELECT * FROM table WHERE $where_sql ORDER BY $order_by LIMIT $limit OFFSET $offset";
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$rows = $stmt->fetchAll();
-
-// 5. Render HTML
-$page_title = "Module Name";
-require_once '../../includes/header.php';
-require_once '../../includes/sidebar.php';
-?>
-<!-- HTML with Tailwind classes -->
-```
-
-### AJAX Search Pattern (Computers module)
-
-The search input fires a debounced AJAX GET to `?ajax=1&search=...`. The server detects `$is_ajax = isset($_GET['ajax'])` and returns only the table `<tbody>` HTML, which JS injects into `#computer-table-container`.
-
-### CSV Export Pattern
-
-```php
-if (isset($_GET['export']) && $_GET['export'] === 'csv') {
-    header('Content-Type: text/csv');
-    header('Content-Disposition: attachment; filename="export.csv"');
-    $output = fopen('php://output', 'w');
-    fputcsv($output, ['Col1', 'Col2', ...]);
-    foreach ($rows as $row) {
-        fputcsv($output, [escapeCsvField($row['col1']), ...]);
+function escapeCsvField($val) {
+    if ($val === null || $val === '') return '';
+    $firstChar = substr($val, 0, 1);
+    if (in_array($firstChar, ['=', '+', '-', '@', "\t", "\r"])) {
+        return "'" . $val;
     }
-    fclose($output); exit;
+    return $val;
 }
 ```
 
-`escapeCsvField()` prefixes cells starting with `=`, `+`, `-`, `@` with a single quote to prevent CSV formula injection.
+---
 
-### Duplicate Detection Pattern
+## 10. Security Hardening & Zero-Hardcoding Architecture
 
-Before inserting, always check:
-```php
-$check = $pdo->prepare("SELECT COUNT(*) FROM table WHERE unique_col = ? AND id != ?");
-$check->execute([$value, $id ?? 0]);
-if ($check->fetchColumn() > 0) { $error_msg = "Duplicate found"; }
-```
-
-Special case in IPs/Computers: values containing "obtain" or "wifi" are excluded from duplicate checks.
+- **Dynamic Server IP Binding**: No IP addresses are hardcoded in application logic. The server LAN IP is injected via Apache's `httpd.conf`:
+  ```apache
+  SetEnv LOCAL_HOST_IP 192.163.10.11
+  ```
+  Scripts reference `getenv('LOCAL_HOST_IP')`.
+- **Dynamic Domain Path Resolution**: `config.php` detects root domain vs. subdirectory installations:
+  ```php
+  $script_name = $_SERVER['SCRIPT_NAME'] ?? '';
+  $base_url = (strpos($script_name, '/HSNM') !== false) ? '/HSNM' : '';
+  define('BASE_URL', $base_url);
+  ```
+- **Prepared Statements Everywhere**: 100% of database interactions utilize PDO prepared statements with strongly-typed bound parameters.
+- **XSS Protection**: All user-supplied data in HTML output is escaped using `htmlspecialchars($val, ENT_QUOTES, 'UTF-8')`.
 
 ---
 
-## 10. Security Features
+## 11. Operational Runbook & Deployment Guide
 
-| Feature | Implementation |
-|---|---|
-| **CSRF Protection** | Every POST form includes `<?= getCsrfInput() ?>` — a hidden token verified server-side with `hash_equals()` |
-| **SQL Injection** | All queries use PDO prepared statements with bound parameters |
-| **XSS Prevention** | All output uses `htmlspecialchars()` |
-| **Password Hashing** | bcrypt via `password_hash()` / `password_verify()` |
-| **Session Security** | HttpOnly + SameSite=Lax cookies; no-cache headers to prevent auth page caching |
-| **Security Headers** | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `X-XSS-Protection` |
-| **CSV Injection** | `escapeCsvField()` prepends `'` to formula-starting characters |
-| **Access Control** | `requireLogin()` on every page; `canAccessModule()` on every nav link and module entry |
-| **Error Reporting** | `display_errors = 0` in production; errors logged silently |
-| **CLI Bypass** | CSRF and login checks are skipped when `php_sapi_name() === 'cli'` for migration scripts |
+### Local XAMPP Setup (Hospital Intranet)
+1. Clone the repository into `C:\xampp\htdocs\HSNM`.
+2. Configure Apache VirtualHost in `httpd-vhosts.conf` for `ihoms` (`192.163.10.11`).
+3. Add `SetEnv LOCAL_HOST_IP 192.163.10.11` to `httpd.conf`.
+4. Configure Acrylic DNS Proxy to broadcast `ihoms` across hospital `/21` subnets.
+5. Execute schema migrations at `http://localhost/HSNM/run_status_migration.php`.
+6. Run the computer-to-asset sync runner at `http://localhost/HSNM/run_computers_to_assets_sync.php`.
 
----
-
-## Quick Reference: URL Structure
-
-| URL | Module |
-|---|---|
-| `/HSNM/` | Dashboard |
-| `/HSNM/login` | Login |
-| `/HSNM/modules/routers/` | Router Inventory |
-| `/HSNM/modules/switches/` | Switch Inventory |
-| `/HSNM/modules/ips/` | IP Address Management |
-| `/HSNM/modules/computers/` | Computer Inventory |
-| `/HSNM/modules/office/` | MS Office Licenses |
-| `/HSNM/modules/reconciliation/` | Compare & Sync |
-| `/HSNM/modules/ics/` | ICS Inventory |
-| `/HSNM/modules/pabx/` | PABX Directory |
-| `/HSNM/modules/ihoms_links/` | IS Links |
-| `/HSNM/modules/printers/` | Printers |
-| `/HSNM/modules/queueing_tv/` | Queueing TV |
-| `/HSNM/modules/logs/` | Audit Logs |
-| `/HSNM/modules/settings/` | Settings (admin) |
-| `/HSNM/modules/changelog/` | Changelog |
+### Cloud Synchronization Operations (`sync_neon.php`)
+1. Log in with an **Admin** user account.
+2. Click **Data Sync** in the sidebar.
+3. Review row counts comparing Local vs. Neon Cloud databases.
+4. Check **Allow Deletion Sync** if local deletions should propagate.
+5. Click **Execute Synchronization** to complete the bi-directional backup.
