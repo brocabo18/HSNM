@@ -91,8 +91,32 @@ $stats['printers']['total']    = $safeCount("SELECT COUNT(*) FROM printers");
 $stats['queueing_tv']['total'] = $safeCount("SELECT COUNT(*) FROM queueing_tvs");
 
 // Reconciliation (Mismatches + Conflicts)
-$mismatch_count = $safeCount("SELECT COUNT(*) FROM computers c INNER JOIN ips i ON c.control_number = i.control_number WHERE (COALESCE(i.ip_address, '') != COALESCE(c.ip_address, '')) OR (COALESCE(i.mac_address, '') != COALESCE(c.mac_address, ''))");
-$conflict_count = $safeCount("SELECT COUNT(*) FROM computers c INNER JOIN ips i ON (i.ip_address = c.ip_address OR i.mac_address = c.mac_address) WHERE (i.control_number != c.control_number) AND ((i.ip_address = c.ip_address AND i.ip_address != '' AND i.ip_address IS NOT NULL AND c.ip_address NOT LIKE '%DHCP%') OR (i.mac_address = c.mac_address AND i.mac_address != '' AND i.mac_address IS NOT NULL))");
+// Only count real mismatches: BOTH sides must have a non-empty value that actually differs.
+// Excludes the ~1,025 false positives where one side simply has no IP/MAC recorded yet.
+$mismatch_count = $safeCount("SELECT COUNT(*) FROM computers c
+    INNER JOIN ips i ON c.control_number = i.control_number
+    WHERE c.control_number != '' AND c.control_number IS NOT NULL
+    AND (
+        (c.ip_address IS NOT NULL AND TRIM(c.ip_address) != ''
+         AND i.ip_address IS NOT NULL AND TRIM(i.ip_address) != ''
+         AND TRIM(c.ip_address) != TRIM(i.ip_address)
+         AND c.ip_address NOT ILIKE '%DHCP%' AND i.ip_address NOT ILIKE '%DHCP%')
+        OR
+        (c.mac_address IS NOT NULL AND TRIM(c.mac_address) != ''
+         AND i.mac_address IS NOT NULL AND TRIM(i.mac_address) != ''
+         AND REPLACE(TRIM(UPPER(c.mac_address)),':','-') != REPLACE(TRIM(UPPER(i.mac_address)),':','-'))
+    )");
+$conflict_count = $safeCount("SELECT COUNT(*) FROM computers c
+    INNER JOIN ips i ON (i.ip_address = c.ip_address OR i.mac_address = c.mac_address)
+    WHERE i.control_number != c.control_number
+      AND c.control_number != '' AND c.control_number IS NOT NULL
+      AND i.control_number != '' AND i.control_number IS NOT NULL
+      AND (
+        (i.ip_address = c.ip_address AND i.ip_address != '' AND i.ip_address IS NOT NULL
+         AND c.ip_address NOT ILIKE '%DHCP%' AND i.ip_address NOT ILIKE '%DHCP%')
+        OR
+        (i.mac_address = c.mac_address AND i.mac_address != '' AND i.mac_address IS NOT NULL)
+      )");
 $stats['reconciliation']['total'] = $mismatch_count + $conflict_count;
 
 // Compute aggregate overview numbers

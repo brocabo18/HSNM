@@ -404,13 +404,22 @@ if ($view === 'mismatch') {
     // 1. Data Mismatches (Same CN, Diff Data)
     // Normalize MAC separators (colon vs dash) so format differences are not flagged as real mismatches.
     // Also exclude empty/null control numbers to prevent a cartesian join against all unassigned IPS rows.
+    // IMPORTANT: Only flag as mismatch when BOTH sides have a real non-empty value that differs.
+    // Records where one side has no IP/MAC recorded are NOT mismatches — they are simply unlinked.
     $where_condition = "
         c.control_number != '' AND c.control_number IS NOT NULL
         AND (
-            (COALESCE(i.ip_address, '') != COALESCE(c.ip_address, ''))
+            (
+                c.ip_address IS NOT NULL AND TRIM(c.ip_address) != ''
+                AND i.ip_address IS NOT NULL AND TRIM(i.ip_address) != ''
+                AND TRIM(c.ip_address) != TRIM(i.ip_address)
+                AND c.ip_address NOT ILIKE '%DHCP%' AND i.ip_address NOT ILIKE '%DHCP%'
+            )
             OR (
-                REPLACE(COALESCE(i.mac_address, ''), ':', '-') !=
-                REPLACE(COALESCE(c.mac_address, ''), ':', '-')
+                c.mac_address IS NOT NULL AND TRIM(c.mac_address) != ''
+                AND i.mac_address IS NOT NULL AND TRIM(i.mac_address) != ''
+                AND REPLACE(TRIM(UPPER(c.mac_address)), ':', '-') !=
+                    REPLACE(TRIM(UPPER(i.mac_address)), ':', '-')
             )
         )";
     
@@ -430,12 +439,16 @@ if ($view === 'mismatch') {
 
 } elseif ($view === 'conflict') {
     // 2. Identity Conflicts (Diff CN, Same Data)
-    // Detect conflicts when either IP or MAC address is in use by different control numbers
+    // Detect conflicts when either IP or MAC address is in use by different control numbers.
+    // Both control numbers must be non-empty to avoid matching unassigned/blank rows.
     $where_condition = "
-        (i.control_number != c.control_number OR (i.control_number IS NOT NULL AND i.control_number != '' AND (c.control_number IS NULL OR c.control_number = '')))
+        i.control_number != c.control_number
+        AND c.control_number != '' AND c.control_number IS NOT NULL
+        AND i.control_number != '' AND i.control_number IS NOT NULL
         AND (
-            (i.ip_address = c.ip_address AND i.ip_address != '' AND i.ip_address IS NOT NULL AND c.ip_address NOT LIKE '%DHCP%')
-            OR 
+            (i.ip_address = c.ip_address AND i.ip_address != '' AND i.ip_address IS NOT NULL
+             AND c.ip_address NOT ILIKE '%DHCP%' AND i.ip_address NOT ILIKE '%DHCP%')
+            OR
             (i.mac_address = c.mac_address AND i.mac_address != '' AND i.mac_address IS NOT NULL)
         )
     ";
