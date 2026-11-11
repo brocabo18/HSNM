@@ -229,9 +229,9 @@ function getAppVersion($pdo)
         if (!empty($ver)) {
             return str_starts_with($ver, 'v') ? $ver : 'v' . $ver;
         }
-        return 'v1.15.2'; // Fallback current version
+        return 'v1.15.6'; // Fallback current version
     } catch (Exception $e) {
-        return 'v1.15.3'; // Fallback version
+        return 'v1.15.6'; // Fallback version
     }
 }
 

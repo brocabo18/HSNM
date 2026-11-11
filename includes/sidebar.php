@@ -334,7 +334,7 @@ elseif (strpos($current_path, '/modules/settings') !== false)
         <!-- App Version -->
         <div class="text-center pt-0.5">
             <a href="<?= BASE_URL ?>/modules/changelog/" class="text-[10px] font-mono text-slate-400 hover:text-primary transition-colors">
-                <?= isset($pdo) ? getAppVersion($pdo) : 'v1.15.2' ?>
+                <?= isset($pdo) ? getAppVersion($pdo) : 'v1.15.6' ?>
             </a>
         </div>
     </div>
