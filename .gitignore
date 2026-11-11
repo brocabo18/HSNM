@@ -49,3 +49,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Auto-sync logs
+logs/
+auto_sync_neon.php
+auto_git_push.ps1
+install_autosync_task.bat
