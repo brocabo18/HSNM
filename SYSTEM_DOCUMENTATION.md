@@ -1,6 +1,6 @@
 # Hardware & Security Network Management (HSNM)
 ## Comprehensive System Technical Documentation & Manual
-**Version:** v1.15.5  
+**Version:** v1.15.6  
 **Last Updated:** November 11, 2026  
 **Primary Maintainer / Author:** IHOMS-MIKE  
 **Target Environment:** Local Intranet (`http://ihoms/HSNM` / `192.163.10.11`) & Neon Cloud Failover
@@ -16,6 +16,7 @@
    - [5.1 Central Computer Inventory (`/modules/computers/`)](#51-central-computer-inventory-modulescomputers)
    - [5.2 Multi-Facility Satellite Computers (`jasmc_st`, `jasmc_vt`, `doh_jbl_cmc`)](#52-multi-facility-satellite-computers-jasmc_st-jasmc_vt-doh_jbl_cmc)
    - [5.3 Multi-Facility Satellite IP Management (`ips_jasmc_st`, `ips_jasmc_vt`, `ips_doh_jbl_cmc`)](#53-multi-facility-satellite-ip-management-ips_jasmc_st-ips_jasmc_vt-ips_doh_jbl_cmc)
+   - [5.3a Outsourced Inventory Modules (`outsourced`, `ips_outsourced`)](#53a-outsourced-inventory-modules-outsourced-ips_outsourced)
    - [5.4 Capital Asset Registry (`/modules/assets/`)](#54-capital-asset-registry-modulesassets)
    - [5.5 Preventive Maintenance (PM) Suite (`/modules/maintenance/`)](#55-preventive-maintenance-pm-suite-modulesmaintenance)
    - [5.6 Hospital IP Address Management (`/modules/ips/`)](#56-hospital-ip-address-management-modulesips)
@@ -27,7 +28,7 @@
 6. [Complete Database Schema & Data Dictionary](#6-complete-database-schema--data-dictionary)
 7. [Network Topology, DNS Proxy & VirtualHost Setup](#7-network-topology-dns-proxy--virtualhost-setup)
 8. [Database Cloud Synchronization 2.0 & Disaster Recovery](#8-database-cloud-synchronization-20--disaster-recovery)
-9. [Chronological Revision History (v1.0.0 – v1.15.5)](#9-chronological-revision-history-v100--v1155)
+9. [Chronological Revision History (v1.0.0 – v1.15.6)](#9-chronological-revision-history-v100--v1156)
 10. [System Administration & Operational Runbook](#10-system-administration--operational-runbook)
 
 ---
@@ -135,6 +136,8 @@ c:/xampp/htdocs/HSNM/
     ├── ips_jasmc_st/              # JASMC-ST Satellite IP Inventory
     ├── ips_jasmc_vt/              # JASMC-VT Satellite IP Inventory
     ├── ips_doh_jbl_cmc/           # DOH-JBL-CMC Satellite IP Inventory
+    ├── outsourced/                # Outsourced Computer Inventory (JBL-OS-* control numbers)
+    ├── ips_outsourced/            # Outsourced IP Address Inventory (JBL-OS-* control numbers)
     ├── assets/                    # General Asset Inventory & Property Tracking
     │   ├── index.php              # Asset catalog, financial costs, PTR numbers, exports
     │   ├── _asset_form.php        # Sectioned asset input partial
@@ -231,6 +234,7 @@ Three dedicated satellite modules mirroring the headquarters computer inventory:
   - Cross-facility switcher tabs rendered at the top of each view (`includes/satellite_computer_tabs.php`) with real-time record count badges.
   - Source tracking via `source_computer_id` referencing parent headquarters record.
   - Independent Excel/CSV exports and printable rosters.
+  - **Filter Dropdown Auto-Submit** (v1.15.6): `status`, `sort`, and `limit` selects include `onchange="this.form.submit()"` so filters apply immediately on selection, without requiring a manual "Filter" button click.
 
 ### 5.3 Multi-Facility Satellite IP Management (`ips_jasmc_st`, `ips_jasmc_vt`, `ips_doh_jbl_cmc`)
 Dedicated IP management subsystems for each external branch facility:
@@ -241,6 +245,47 @@ Dedicated IP management subsystems for each external branch facility:
   - Status management: `active`, `available`, `reserved`.
   - Top switcher tabs (`includes/satellite_ip_tabs.php`) allowing one-click navigation between Hospital Main IP space and branch facilities.
   - Diagnostic ICMP ping and ARP/MAC discovery for remote subnets.
+
+### 5.3a Outsourced Inventory Modules (`outsourced`, `ips_outsourced`)
+
+New in **v1.15.6**. These two modules expose equipment and IP records belonging to externally managed (outsourced/donated) units under the `JBL-OS-` control number namespace.
+
+#### Architecture
+- **No new database tables are created.** Both modules query the existing `computers` and `ips` tables respectively, scoped with a `WHERE control_number LIKE 'JBL-OS-%'` filter.
+- The `LIKE 'JBL-OS-%'` pattern is intentionally strict — it **excludes** `JBL-OSM-%` and other similarly-prefixed namespaces, matching only records that start with exactly `JBL-OS-`.
+
+#### Outsourced Computer Inventory (`modules/outsourced/`)
+- **Source table**: `computers` filtered by `control_number LIKE 'JBL-OS-%'`
+- **UI**: Violet theme, `handshake` Material Icon
+- **Control number enforcement**:
+  - **Client-side**: `enforceOsPrefix()` JavaScript function pre-fills the control number field with `JBL-OS-` and prevents submission if the prefix is removed.
+  - **Server-side**: PHP validates that submitted `control_number` starts with `JBL-OS-` before any INSERT/UPDATE.
+- **Exports**: Excel and CSV exports are scoped to `JBL-OS-%` records only.
+- **Initial data**: 2 existing records visible immediately — `JBL-OS-HS-PC001`, `JBL-OS-RAD-PC031`.
+- **URL**: `/modules/outsourced/`
+
+#### Outsourced IP Address Inventory (`modules/ips_outsourced/`)
+- **Source table**: `ips` filtered by `control_number LIKE 'JBL-OS-%'`
+- **UI**: Violet theme, `handshake` Material Icon
+- **Control number enforcement**: `enforceIpOsPrefix()` JS function + server-side PHP validation, identical pattern to the computer module.
+- **Exports**: Excel and CSV scoped to `JBL-OS-%` records.
+- **Main IP tab badge** still shows the **full** count (2,032 — JBL-OS- records are included in the Main `ips` module).
+- **Initial data**: 11 existing records visible immediately.
+- **URL**: `/modules/ips_outsourced/`
+
+#### Tab & Sidebar Integration
+| Component | Change |
+|---|---|
+| `includes/satellite_computer_tabs.php` | Added "Outsourced" tab (violet, `handshake` icon); active state: `outsourced`; live badge `SELECT COUNT(*) FROM computers WHERE control_number LIKE 'JBL-OS-%'` |
+| `includes/satellite_ip_tabs.php` | Added "Outsourced" tab (violet, `handshake` icon); live badge `SELECT COUNT(*) FROM ips WHERE control_number LIKE 'JBL-OS-%'`; Main tab count unchanged |
+| `includes/sidebar.php` | Added `ips_outsourced` active-page detection **before** the `ips` check (prevents substring collision); added "Outsourced IPs" link (violet) under IP Addresses section |
+
+#### MAC Address Search Normalization (v1.15.6)
+`modules/computers/index.php`, `modules/ips/index.php`, `modules/ips/_satellite_ip_template.php`, and `IP-Address-Inventory/index.php` normalize MAC address search input by converting colons (`:`) to hyphens (`-`) before executing the database query:
+```php
+$search = str_replace(':', '-', $search);
+```
+This ensures MAC addresses stored with hyphens (e.g., `00-1A-2B-3C-4D-5E`) are correctly found when users search using colon notation (e.g., `00:1A:2B:3C:4D:5E`).
 
 ### 5.4 Capital Asset Registry (`/modules/assets/`)
 Tracks physical assets, procurement metadata, and financial valuation.
@@ -319,7 +364,7 @@ An automated audit tool comparing the **IP Address Inventory** against the **Com
 ### 5.11 Reporting, Auditing, Changelog & User Settings
 - **`reports`**: Cross-tabulation reports grouped by department, building, floor, hardware specifications, and lifecycle statuses.
 - **`logs`**: Central activity log with category filters (User, IP, Computer, Reconciliation, System) and export tools.
-- **`changelog`**: Automated code change detector using MD5 checksums, paired with a version history timeline displaying current system revision (`v1.15.5`).
+- **`changelog`**: Automated code change detector using MD5 checksums, paired with a version history timeline displaying current system revision (`v1.15.6`).
 - **`settings`**: User account management, password resets, role assignment (`Admin`, `Editor`, `Viewer`), and JSONB permission checkboxes.
 
 ---
@@ -440,10 +485,11 @@ flowchart LR
 
 ---
 
-## 9. Chronological Revision History (v1.0.0 – v1.15.5)
+## 9. Chronological Revision History (v1.0.0 – v1.15.6)
 
 | Version | Date | Module | Type | Technical Summary |
 |---|---|---|---|---|
+| **v1.15.6** | 2026-11-11 | Outsourced Modules & Fixes | `feature` / `fix` | **Outsourced Inventory Modules, Filter UX & MAC Normalization:** Added `modules/outsourced/` (Outsourced Computer Inventory) and `modules/ips_outsourced/` (Outsourced IP Inventory) — both filter the existing `computers`/`ips` tables by `control_number LIKE 'JBL-OS-%'` with no new DB tables. Violet UI, `handshake` icon, `enforceOsPrefix()` / `enforceIpOsPrefix()` client+server prefix enforcement, scoped Excel/CSV exports. Added "Outsourced" tab to both switcher tab bars and "Outsourced IPs" sidebar link. Fixed filter dropdown auto-submit (`onchange="this.form.submit()"`) in JASMC-ST, JASMC-VT, DOH-JBL-CMC satellite modules. Fixed MAC address search to normalize `:` → `-` before querying. |
 | **v1.15.5** | 2026-11-11 | Satellites & Core | `feature` | **Multi-Facility Satellite IP Inventories & Resilient Sync:** Added dedicated Satellite IP Address Management modules (`ips_jasmc_st`, `ips_jasmc_vt`, `ips_doh_jbl_cmc`) with shared template architecture and top switcher tabs. Implemented query-isolated dashboard metrics (`$safeCount`, `$safeSum`) in `index.php` preventing schema drift from zeroing metrics. Upgraded `sync_neon.php` to Sync Engine 2.0 with dynamic table discovery, column intersection, and unique constraint resolution across all 22 system tables. Added self-hosted offline fonts (Inter, Material Symbols WOFF2) and local Tailwind JS bundle. Implemented printable official PM checklists and Asset inventory sheets. Added `'Maintenance'` status option. |
 | **v1.15.4** | 2026-10-28 | Asset Management | `feature` | **Computers to Assets & Maintenance One-Click Migration Runner:** Created interactive web migration utility (`run_computers_to_assets_sync.php`) accessible directly from Asset Inventory header before Export Excel. Executes conflict-safe upsert of 872 workstations into `assets` and seeds 574 historical PMS audit logs into `maintenance` with dual foreign key linkage. Added real-time `syncComputerToAsset()` hooks on computer additions/updates. |
 | **v1.15.3** | 2026-10-27 | Dashboard | `enhancement` | **Unified Dashboard Overview Overhaul:** Redesigned main dashboard (`index.php`) featuring 4-metric executive ribbon (Tracked Devices, IP Allocation, Satellite Units, Sync Integrity), dedicated Satellite Hospital Inventories Hub (JASMC-ST, JASMC-VT, DOH-JBL-CMC), workstation status breakdown (Working, Maintenance, Transferred, Condemned), full Asset Inventory & PM KPI cards, and reorganized Quick Action shortcuts. |

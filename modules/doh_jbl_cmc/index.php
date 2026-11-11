@@ -637,7 +637,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 }
 
 // â”€â”€ Fetch / Filters / Pagination â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-$search_term      = $_GET['search']     ?? '';
+$search_term      = trim($_GET['search'] ?? '');
+if (strpos($search_term, ':') !== false) {
+    $search_term = str_replace(':', '-', $search_term);
+}
 $status_filter    = $_GET['status']     ?? 'All';
 $sort_by          = $_GET['sort']       ?? 'id_desc';
 $page             = max(1, (int)($_GET['page']  ?? 1));
@@ -800,20 +803,20 @@ require_once '../../includes/sidebar.php';
                 <span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
                 <input type="text" name="search" value="<?= htmlspecialchars($search_term) ?>" placeholder="Search user, control#, IP..." class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-primary">
             </div>
-            <select name="status" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+            <select name="status" onchange="this.form.submit()" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                 <option value="All" <?= $status_filter === 'All' ? 'selected' : '' ?>>All Status</option>
                 <option value="Working"     <?= $status_filter === 'Working'     ? 'selected' : '' ?>>Working</option>
                 <option value="Maintenance" <?= $status_filter === 'Maintenance' ? 'selected' : '' ?>>Maintenance</option>
                 <option value="Transferred" <?= $status_filter === 'Transferred' ? 'selected' : '' ?>>Transferred</option>
                 <option value="Condemned"   <?= $status_filter === 'Condemned'   ? 'selected' : '' ?>>Condemned</option>
             </select>
-            <select name="sort" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+            <select name="sort" onchange="this.form.submit()" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                 <option value="id_desc"  <?= $sort_by === 'id_desc'  ? 'selected' : '' ?>>Newest First</option>
                 <option value="id_asc"   <?= $sort_by === 'id_asc'   ? 'selected' : '' ?>>Oldest First</option>
                 <option value="user_asc" <?= $sort_by === 'user_asc' ? 'selected' : '' ?>>User (A-Z)</option>
                 <option value="dept_asc" <?= $sort_by === 'dept_asc' ? 'selected' : '' ?>>Location (A-Z)</option>
             </select>
-            <select name="limit" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
+            <select name="limit" onchange="this.form.submit()" class="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary">
                 <option value="15"  <?= $limit_param == '15'  ? 'selected' : '' ?>>15</option>
                 <option value="50"  <?= $limit_param == '50'  ? 'selected' : '' ?>>50</option>
                 <option value="100" <?= $limit_param == '100' ? 'selected' : '' ?>>100</option>

@@ -35,7 +35,10 @@ $page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
 $perPage = 50;
 $offset = ($page - 1) * $perPage;
 
-$search = $_GET['search'] ?? '';
+$search = trim($_GET['search'] ?? '');
+if (strpos($search, ':') !== false) {
+    $search = str_replace(':', '-', $search);
+}
 $statusFilter = $_GET['status'] ?? '';
 
 $whereClause = "WHERE 1=1";

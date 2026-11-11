@@ -11,7 +11,10 @@ $active_tab = "bg-primary text-white";
 $inactive_tab = "text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-[#232b3d]";
 
 // Search Parameter
-$search = $_GET['search'] ?? '';
+$search = trim($_GET['search'] ?? '');
+if (strpos($search, ':') !== false) {
+    $search = str_replace(':', '-', $search);
+}
 $is_ajax = isset($_GET['ajax']);
 
 // --- ACTION HANDLERS ---

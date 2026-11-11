@@ -419,7 +419,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
                         $row[26] ?? '',  // microsoft_office
                         $row[27] ?? '',  // ms_office_email
                         $row[28] ?? '',  // ip_address
-                        $row[29] ?? '',  // mac_address
+                        strtoupper(str_replace(':', '-', trim($row[29] ?? ''))),  // mac_address
                         $row[30] ?? 'N', // endpoint_secure
                         $has_firewall_col ? ($row[31] ?? 'N') : 'N', // firewall
                         $row[31 + $fw_offset] ?? '',  // checked_by
@@ -459,7 +459,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
                         $row[24] ?? '',  // microsoft_office
                         $row[25] ?? '',  // ms_office_email
                         $row[26] ?? '',  // ip_address
-                        $row[27] ?? '',  // mac_address
+                        strtoupper(str_replace(':', '-', trim($row[27] ?? ''))),  // mac_address
                         $row[28] ?? 'N', // endpoint_secure
                         'N',             // firewall (not in old format)
                         $row[29] ?? '',  // checked_by
@@ -570,7 +570,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
 
         // MAC Address
-        $mac = $_POST['mac_address'] ?? '';
+        $mac = strtoupper(str_replace(':', '-', trim($_POST['mac_address'] ?? '')));
+        $_POST['mac_address'] = $mac;
         if (!empty($mac)) {
             $check = $pdo->prepare("SELECT end_user, control_number FROM computers WHERE mac_address = ? LIMIT 1");
             $check->execute([$mac]);
@@ -784,7 +785,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $id = $_POST['id'] ?? 0;
     $control_number = $_POST['control_number'] ?? '';
     $ip = $_POST['ip_address'] ?? '';
-    $mac = $_POST['mac_address'] ?? '';
+    $mac = strtoupper(str_replace(':', '-', trim($_POST['mac_address'] ?? '')));
+    $_POST['mac_address'] = $mac;
     $encoded_by = trim($_POST['encoded_by'] ?? '');
     $checked_by = trim($_POST['checked_by'] ?? '');
 
@@ -1147,7 +1149,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 $is_ajax = isset($_GET['ajax']);
 
 // Fetch Computers with Search, Filter, Sort, and Pagination
-$search_term = $_GET['search'] ?? '';
+$search_term = trim($_GET['search'] ?? '');
+// Convert colons to hyphens when searching (for MAC addresses e.g. 00:1A:2B:3C:4D:5E -> 00-1A-2B-3C-4D-5E)
+if (strpos($search_term, ':') !== false) {
+    $search_term = str_replace(':', '-', $search_term);
+}
 $status_filter = $_GET['status'] ?? 'All';
 $department_filter = $_GET['department'] ?? 'All';
 $printer_filter = $_GET['printer'] ?? 'All';
@@ -2099,7 +2105,7 @@ if (!$is_ajax) {
                     <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Network &amp; Security</p>
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">IP Address</label><input type="text" name="ip_address" placeholder="192.163.x.x" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
-                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MAC Address</label><input type="text" name="mac_address" placeholder="00:1A:2B:..." class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MAC Address</label><input type="text" name="mac_address" placeholder="00-1A-2B-3C-4D-5E" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure</label><select name="endpoint_secure" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall</label><select name="firewall" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
                     </div>
@@ -2294,7 +2300,7 @@ if (!$is_ajax) {
                     <p class="text-[10px] font-bold uppercase tracking-widest text-slate-400 border-b border-slate-200 dark:border-[#232b3d] pb-2 mb-4">Network &amp; Security</p>
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">IP Address</label><input type="text" name="ip_address" id="edit_ip_address" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
-                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MAC Address</label><input type="text" name="mac_address" id="edit_mac_address" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MAC Address</label><input type="text" name="mac_address" id="edit_mac_address" placeholder="00-1A-2B-3C-4D-5E" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure</label><select name="endpoint_secure" id="edit_endpoint_secure" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall</label><select name="firewall" id="edit_firewall" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
                     </div>
@@ -2466,7 +2472,14 @@ if (!$is_ajax) {
         let debounceTimer;
 
         searchInput.addEventListener('input', function (e) {
-            const searchTerm = e.target.value;
+            // Auto-convert ':' to '-' for MAC address searches
+            if (this.value.includes(':')) {
+                const start = this.selectionStart;
+                const end = this.selectionEnd;
+                this.value = this.value.replace(/:/g, '-');
+                if (start !== null) this.setSelectionRange(start, end);
+            }
+            const searchTerm = this.value;
 
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
@@ -2497,6 +2510,9 @@ if (!$is_ajax) {
     attachSearchListener();
 
     function fetchResults(term) {
+        // Auto-convert ':' to '-' for MAC address searches
+        term = (term || '').replace(/:/g, '-');
+
         // Get the container dynamically every time because it might have been replaced
         const container = document.getElementById('computer-table-container');
         if (!container) return; // Guard clause
@@ -2666,6 +2682,17 @@ if (!$is_ajax) {
                 const checked = Array.from(dd.querySelectorAll('input[type=checkbox]:checked')).map(c => c.value);
                 if (label) label.textContent = checked.length > 0 ? checked.join(', ') : placeholder;
             });
+        });
+    });
+
+    // Auto-convert ':' to '-' on MAC address input fields
+    document.querySelectorAll('input[name="mac_address"], #edit_mac_address').forEach(el => {
+        el.addEventListener('input', function() {
+            if (this.value.includes(':')) {
+                const start = this.selectionStart, end = this.selectionEnd;
+                this.value = this.value.replace(/:/g, '-').toUpperCase();
+                if (start !== null) this.setSelectionRange(start, end);
+            }
         });
     });
 

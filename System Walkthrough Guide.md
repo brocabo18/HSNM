@@ -1,6 +1,6 @@
 # HSNM — System Walkthrough Guide
 
-[![Version](https://img.shields.io/badge/version-1.15.5-blue.svg)](modules/changelog/)
+[![Version](https://img.shields.io/badge/version-1.15.6-blue.svg)](modules/changelog/)
 [![PHP](https://img.shields.io/badge/PHP-8.1+-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v3-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
@@ -21,6 +21,7 @@
    - [7.1 Executive Dashboard (`index.php`) & Query Isolation Architecture](#71-executive-dashboard-indexphp--query-isolation-architecture)
    - [7.2 Central Computer Inventory (`modules/computers/`)](#72-central-computer-inventory-modulescomputers)
    - [7.3 Multi-Facility Satellite Computers (`jasmc_st`, `jasmc_vt`, `doh_jbl_cmc`)](#73-multi-facility-satellite-computers-jasmc_st-jasmc_vt-doh_jbl_cmc)
+   - [7.3a Outsourced Inventory Module Architecture](#73a-outsourced-inventory-module-architecture)
    - [7.4 Hospital & Satellite IP Address Management](#74-hospital--satellite-ip-address-management)
    - [7.5 Capital Asset Registry (`modules/assets/`)](#75-capital-asset-registry-modulesassets)
    - [7.6 Preventive Maintenance (PM) Suite (`modules/maintenance/`)](#76-preventive-maintenance-pm-suite-modulesmaintenance)
@@ -135,6 +136,8 @@ c:/xampp/htdocs/HSNM/
     ├── ips_jasmc_st/              # JASMC-ST Satellite IP Inventory
     ├── ips_jasmc_vt/              # JASMC-VT Satellite IP Inventory
     ├── ips_doh_jbl_cmc/           # DOH-JBL-CMC Satellite IP Inventory
+    ├── outsourced/                # Outsourced Computer Inventory (JBL-OS-* control numbers)
+    ├── ips_outsourced/            # Outsourced IP Address Inventory (JBL-OS-* control numbers)
     ├── assets/                    # General Asset Inventory & Property Tracking
     │   ├── index.php              # Asset catalog, financial costs, PTR numbers, exports
     │   ├── _asset_form.php        # Sectioned asset input partial
@@ -321,6 +324,92 @@ The primary workstation inventory tracking all desktop computers and laptops in 
   - Setting a computer to `Transferred` triggers the transfer modal.
   - Confirming the destination clones the machine into the target satellite table with status `Working` and populates `source_computer_id`.
   - The central machine is marked `Transferred` with a destination badge (`→ Transferred to: <FACILITY>`).
+- **Filter Dropdown Auto-Submit Pattern** (v1.15.6):
+  All `<select>` filter elements (`status`, `sort`, `limit`) in satellite computer modules include the `onchange` attribute:
+  ```html
+  <select name="status" onchange="this.form.submit()">...</select>
+  ```
+  This eliminates the need for a separate "Filter" button click — selections apply instantly.
+
+---
+
+### 7.3a Outsourced Inventory Module Architecture
+
+New in **v1.15.6**. Two new modules expose outsourced/donated equipment under the `JBL-OS-` control number namespace.
+
+#### How They Are Built
+Both modules follow the same approach: they are **scoped views** of the existing `computers` and `ips` tables, filtered by a `WHERE` clause rather than separate tables:
+
+```php
+// modules/outsourced/index.php — Outsourced Computer Inventory
+$where = "WHERE control_number LIKE 'JBL-OS-%'";
+
+// modules/ips_outsourced/index.php — Outsourced IP Inventory
+$where = "WHERE control_number LIKE 'JBL-OS-%'";
+```
+
+The `LIKE 'JBL-OS-%'` pattern is strict — it does **not** match `JBL-OSM-%` or any other similarly-prefixed namespace.
+
+#### Control Number Prefix Enforcement
+
+**Client-side (JavaScript)**:
+```javascript
+// modules/outsourced/index.php
+function enforceOsPrefix() {
+    const field = document.getElementById('control_number');
+    if (!field.value.startsWith('JBL-OS-')) {
+        field.value = 'JBL-OS-';
+    }
+}
+
+// modules/ips_outsourced/index.php
+function enforceIpOsPrefix() {
+    const field = document.getElementById('control_number');
+    if (!field.value.startsWith('JBL-OS-')) {
+        field.value = 'JBL-OS-';
+    }
+}
+```
+
+**Server-side (PHP)**:
+```php
+if (!str_starts_with($_POST['control_number'], 'JBL-OS-')) {
+    $error = "Control number must start with JBL-OS-.";
+}
+```
+
+#### Active Tab State
+```php
+// modules/outsourced/index.php
+$active_comp_tab = 'outsourced';
+
+// modules/ips_outsourced/index.php
+$active_ip_tab = 'outsourced';
+```
+These variables are read by `includes/satellite_computer_tabs.php` and `includes/satellite_ip_tabs.php` respectively to highlight the active tab.
+
+#### Tab Integration (`satellite_computer_tabs.php` / `satellite_ip_tabs.php`)
+- Added a new **Outsourced** tab (violet background, `handshake` Material Icon) after the DOH-JBL-CMC tab.
+- Live badge query for computers: `SELECT COUNT(*) FROM computers WHERE control_number LIKE 'JBL-OS-%'`
+- Live badge query for IPs: `SELECT COUNT(*) FROM ips WHERE control_number LIKE 'JBL-OS-%'`
+- Main IP tab badge still counts **all** `ips` records (JBL-OS- records included).
+
+#### Sidebar Integration (`sidebar.php`)
+```php
+// IMPORTANT: ips_outsourced check must come BEFORE the ips check
+// to prevent the 'ips' substring from matching 'ips_outsourced'
+$active_page = 'ips_outsourced';  // set before the generic ips check
+```
+"Outsourced IPs" link added under the **IP Addresses** section (violet styling), mirroring the existing "Outsourced" link under **Computers**.
+
+#### MAC Address Search Normalization (v1.15.6)
+Search input in computer and IP modules is normalized before the query:
+```php
+// Normalize MAC address search: colon notation → hyphen notation
+$search_normalized = str_replace(':', '-', $search);
+// $search_normalized is then used in the LIKE %...% query
+```
+Affected files: `modules/computers/index.php`, `modules/ips/index.php`, `modules/ips/_satellite_ip_template.php`, `IP-Address-Inventory/index.php`.
 
 ---
 

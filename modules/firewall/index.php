@@ -41,6 +41,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // ── CSV Export ────────────────────────────────────────────────────────────────
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $search  = trim($_GET['search']  ?? '');
+    if (strpos($search, ':') !== false) {
+        $search = str_replace(':', '-', $search);
+    }
     $loc_f   = trim($_GET['location'] ?? '');
 
     $where = ["c.firewall = 'Y'"];
@@ -84,6 +87,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
 // ── Params ────────────────────────────────────────────────────────────────────
 $search    = trim($_GET['search']   ?? '');
+if (strpos($search, ':') !== false) {
+    $search = str_replace(':', '-', $search);
+}
 $loc_f     = trim($_GET['location'] ?? '');
 $status_f  = trim($_GET['fw_status'] ?? '');
 $sort_fw   = trim($_GET['sort'] ?? 'dept_asc');

@@ -1,6 +1,6 @@
 # Hardware & Security Network Management (HSNM)
 ## Official Operations & User Manual (SOP Manual)
-**Version:** v1.15.5  
+**Version:** v1.15.6  
 **Last Updated:** November 11, 2026  
 **Target Audience:** Hospital IT Staff, Network Administrators, Property Custodians, and Technical Support Personnel  
 **Web Portal:** `http://ihoms/HSNM` *(or `http://192.163.10.11/HSNM`)*
@@ -67,7 +67,7 @@ flowchart LR
    *(If your workstation has not yet acquired the local DNS settings, use `http://192.163.10.11/HSNM`).*
 
 ### Interface Layout
-- **Left Navigation Sidebar**: Contains categorized links to all authorized modules. The bottom includes a **Theme Toggle** (Dark / Light mode) and your user profile with the current version badge (`v1.15.5`).
+- **Left Navigation Sidebar**: Contains categorized links to all authorized modules. The bottom includes a **Theme Toggle** (Dark / Light mode) and your user profile with the current version badge (`v1.15.6`).
 - **Top Control Bar**: Provides action buttons (Add Record, Export Excel, Export CSV, Import CSV, Print) alongside summary KPI cards.
 - **Search & Filter Bar**: Real-time keyword filter and dropdown selectors for status, department, and sort order.
 - **Data Table**: Features sticky header columns, 15 records per page default pagination, interactive status badges, and action toolbars.
@@ -112,7 +112,7 @@ Always log out before stepping away from your terminal:
 Accessible via **Sidebar → Computers** (`/modules/computers/`).
 
 ### 3.1 Searching, Filtering & Pagination
-- **Live Search**: Type into the search input box. Workstations matching the user name, control number, serial number, IP address, or MAC address filter dynamically.
+- **Live Search**: Type into the search input box. Workstations matching the user name, control number, serial number, IP address, or MAC address filter dynamically. **MAC addresses can be searched using either colon (`00:1A:2B:3C:4D:5E`) or hyphen (`00-1A-2B-3C-4D-5E`) notation** — the system normalizes the format automatically.
 - **Status Filter**:
   - `All Status` (Displays all records)
   - `Working` (Workstations active in headquarters)
@@ -221,20 +221,58 @@ HSNM provides dedicated subsystems for each affiliated health facility:
   - ↳ **JASMC-ST** (`/modules/jasmc_st/`)
   - ↳ **JASMC-VT** (`/modules/jasmc_vt/`)
   - ↳ **DOH-JBL-CMC** (`/modules/doh_jbl_cmc/`)
+  - ↳ 🤝 **Outsourced** (`/modules/outsourced/`)
 - Each branch maintains an independent database table (`computers_jasmc_st`, `computers_jasmc_vt`, `computers_doh_jbl_cmc`).
+- The **Outsourced** module filters the central `computers` table by `JBL-OS-` control number prefix — no separate DB table is used.
 - Satellite technicians can add local purchases directly or manage equipment transferred from headquarters.
+- **Filter Dropdowns Auto-Apply**: In the JASMC-ST, JASMC-VT, and DOH-JBL-CMC satellite modules, the **Status**, **Sort**, and **Show** (rows per page) dropdowns now apply immediately on selection — no need to click the "Filter" button separately.
 
 ### 4.2 Satellite IP Address Inventories
 - Located in sidebar under **IP Addresses**:
   - ↳ **JASMC-ST** (`/modules/ips_jasmc_st/`)
   - ↳ **JASMC-VT** (`/modules/ips_jasmc_vt/`)
   - ↳ **DOH-JBL-CMC** (`/modules/ips_doh_jbl_cmc/`)
+  - ↳ 🤝 **Outsourced IPs** (`/modules/ips_outsourced/`)
 - Tracks local static IP allocations, MAC addresses, device types, and departments at each remote facility.
+- The **Outsourced IPs** module filters the main `ips` table by `JBL-OS-` control number prefix.
 
 ### 4.3 Cross-Facility Top Switcher Tabs
 Both Computer and IP modules feature unified top navigation tabs (`satellite_computer_tabs.php` and `satellite_ip_tabs.php`):
-- Switch between **Hospital (Main)**, **JASMC-ST**, **JASMC-VT**, and **DOH-JBL-CMC** with 1 click.
+- Switch between **Hospital (Main)**, **JASMC-ST**, **JASMC-VT**, **DOH-JBL-CMC**, and **Outsourced** with 1 click.
 - Each tab displays a live, real-time counter pill showing total registered units.
+- The **Main** IP tab counter includes all records (including JBL-OS- outsourced records). The **Outsourced** tab shows only the JBL-OS- subset.
+
+---
+
+## 4a. Outsourced / Donated Equipment Inventories
+
+The **Outsourced** modules track equipment and IP addresses managed by external service providers or received through donation/outsourcing arrangements. These records are identified by the `JBL-OS-` control number prefix.
+
+### Accessing Outsourced Computers
+1. Click **Computers → Outsourced** in the sidebar, or click the **Outsourced** tab in the top switcher bar.
+2. URL: `http://ihoms/HSNM/modules/outsourced/`
+3. The list shows all computers from the central `computers` table whose control number starts with `JBL-OS-`.
+
+### Accessing Outsourced IPs
+1. Click **IP Addresses → Outsourced IPs** in the sidebar, or click the **Outsourced** tab in the IP switcher bar.
+2. URL: `http://ihoms/HSNM/modules/ips_outsourced/`
+3. The list shows all IP records from the `ips` table whose control number starts with `JBL-OS-`.
+
+### Understanding the `JBL-OS-` Prefix
+- `JBL-OS-` stands for **JBL Outsourced** — it identifies equipment not owned by the hospital but tracked within the inventory system.
+- The prefix is **auto-enforced**: the control number field in the Add and Edit forms is pre-filled with `JBL-OS-` and cannot be removed.
+- Server-side PHP also validates the prefix before saving, rejecting any submission that does not conform.
+- The `JBL-OS-` filter is intentionally strict and **excludes** other similarly-prefixed namespaces (e.g., `JBL-OSM-`).
+
+### Adding a New Outsourced Record
+1. Click **+ Add Computer** (or **+ Add IP**) in the respective Outsourced module.
+2. The **Control Number** field is pre-filled with `JBL-OS-`. Type the rest of the identifier after the prefix (e.g., `JBL-OS-HS-PC005`).
+3. Fill in all other fields as normal.
+4. Click **Add**. The record is saved in the shared `computers` or `ips` table and will appear in both the Outsourced module and the main inventory.
+
+### Exporting Outsourced Records
+- **Export Excel / Export CSV** in the Outsourced modules are **scoped to `JBL-OS-%` records only** — exports will not include non-outsourced equipment.
+- To export the full inventory including outsourced records, use the main **Computers** or **IP Addresses** module export instead.
 
 ---
 
@@ -386,7 +424,7 @@ Accessible via **Sidebar → MS Office** (`/modules/office/`).
 
 - **Reports (`/modules/reports/`)**: Cross-tabular analytics by department, building, floor, and hardware specs.
 - **Audit Logs (`/modules/logs/`)**: Complete audit trail showing who made changes, the exact before-and-after diffs, and IP addresses.
-- **Changelog (`/modules/changelog/`)**: Displays active system version (`v1.15.5`) and tracks codebase modifications using MD5 checksum scans.
+- **Changelog (`/modules/changelog/`)**: Displays active system version (`v1.15.6`) and tracks codebase modifications using MD5 checksum scans.
 
 ---
 

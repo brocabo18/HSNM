@@ -1,6 +1,6 @@
 # Hardware & Security Network Management (HSNM)
 
-[![Version](https://img.shields.io/badge/version-1.15.5-blue.svg)](modules/changelog/)
+[![Version](https://img.shields.io/badge/version-1.15.6-blue.svg)](modules/changelog/)
 [![PHP](https://img.shields.io/badge/PHP-8.1+-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v3-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
@@ -24,6 +24,7 @@
   - **JASMC-ST** (Sto. Tomas): `http://ihoms/HSNM/modules/jasmc_st/`
   - **JASMC-VT** (Victoria Tarlac): `http://ihoms/HSNM/modules/jasmc_vt/`
   - **DOH-JBL-CMC** (Children's Medical Center): `http://ihoms/HSNM/modules/doh_jbl_cmc/`
+  - 🤝 **Outsourced Computers**: `http://ihoms/HSNM/modules/outsourced/`
 
 ### IP Address Management & Satellite Subnets
 - 🌐 **Hospital Main IP Space**: `http://ihoms/HSNM/modules/ips/`
@@ -31,6 +32,7 @@
   - **JASMC-ST IPs**: `http://ihoms/HSNM/modules/ips_jasmc_st/`
   - **JASMC-VT IPs**: `http://ihoms/HSNM/modules/ips_jasmc_vt/`
   - **DOH-JBL-CMC IPs**: `http://ihoms/HSNM/modules/ips_doh_jbl_cmc/`
+  - 🤝 **Outsourced IPs**: `http://ihoms/HSNM/modules/ips_outsourced/`
 
 ### Property, Maintenance & Network Hardware
 - 📦 **Asset Registry & Valuation**: `http://ihoms/HSNM/modules/assets/`
@@ -209,6 +211,8 @@ c:/xampp/htdocs/HSNM/
     ├── ips_jasmc_st/              # JASMC-ST Satellite IP Inventory
     ├── ips_jasmc_vt/              # JASMC-VT Satellite IP Inventory
     ├── ips_doh_jbl_cmc/           # DOH-JBL-CMC Satellite IP Inventory
+    ├── outsourced/                # Outsourced Computer Inventory (JBL-OS-* control numbers)
+    ├── ips_outsourced/            # Outsourced IP Address Inventory (JBL-OS-* control numbers)
     ├── assets/                    # Asset Registry, valuation, & print forms
     ├── maintenance/               # 22-point PM audit checklist & certificates
     ├── routers/                   # Network Routers & gateway monitoring
@@ -232,3 +236,18 @@ c:/xampp/htdocs/HSNM/
 ## 📄 License & Attribution
 
 Developed and maintained by **IHOMS-MIKE** for hospital IT infrastructure operations. Internal enterprise use only.
+
+---
+
+## 📋 Changelog
+
+### v1.15.6 — 2026-11-11
+**Outsourced Inventory Modules, Filter UX Fixes & MAC Search Normalization**
+
+- **New: `modules/outsourced/`** — Outsourced Computer Inventory filtering the `computers` table by `control_number LIKE 'JBL-OS-%'`. Violet-themed UI with handshake icon. Add/Edit forms enforce the `JBL-OS-` prefix (client-side `enforceOsPrefix()` JS + server-side PHP validation). Scoped Excel/CSV export, stats, and all filter dropdowns to `JBL-OS-%`. 2 existing records immediately visible: `JBL-OS-HS-PC001`, `JBL-OS-RAD-PC031`.
+- **New: `modules/ips_outsourced/`** — Outsourced IP Address Inventory filtering the `ips` table by `control_number LIKE 'JBL-OS-%'`. Violet-themed UI with handshake icon. 11 existing records visible immediately. Add/Edit forms enforce the `JBL-OS-` prefix. Scoped Excel/CSV export and stats.
+- **Navigation: `includes/satellite_computer_tabs.php`** — Added "Outsourced" tab (violet, handshake icon) with live badge count.
+- **Navigation: `includes/satellite_ip_tabs.php`** — Added "Outsourced" tab (violet, handshake icon) with live badge count. Main tab count unchanged (all records including JBL-OS-).
+- **Navigation: `includes/sidebar.php`** — Added `ips_outsourced` active-page detection (before `ips` check to avoid substring collision) and "Outsourced IPs" sidebar link (violet, under IP Addresses section).
+- **Bug Fix: Filter dropdown auto-submit** — Added `onchange="this.form.submit()"` to `status`, `sort`, and `limit` selects in `modules/jasmc_st/index.php`, `modules/jasmc_vt/index.php`, `modules/doh_jbl_cmc/index.php`. Filters now apply immediately on selection without requiring a manual "Filter" button click.
+- **Bug Fix: MAC address search normalization** — `modules/computers/index.php`, `modules/ips/index.php`, `modules/ips/_satellite_ip_template.php`, and `IP-Address-Inventory/index.php` now convert colons (`:`) to hyphens (`-`) before querying, so MAC addresses stored as `00-1A-2B-3C-4D-5E` are found when searched as `00:1A:2B:3C:4D:5E`.

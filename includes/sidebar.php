@@ -12,8 +12,12 @@ elseif (strpos($current_path, '/modules/ips_jasmc_vt') !== false)
     $active_page = 'ips_jasmc_vt';
 elseif (strpos($current_path, '/modules/ips_doh_jbl_cmc') !== false)
     $active_page = 'ips_doh_jbl_cmc';
+elseif (strpos($current_path, '/modules/ips_outsourced') !== false)
+    $active_page = 'ips_outsourced';
 elseif (strpos($current_path, '/modules/ips') !== false)
     $active_page = 'ips';
+elseif (strpos($current_path, '/modules/outsourced') !== false)
+    $active_page = 'outsourced';
 elseif (strpos($current_path, '/modules/computers') !== false)
     $active_page = 'computers';
 elseif (strpos($current_path, '/modules/jasmc_st') !== false)
@@ -117,6 +121,11 @@ elseif (strpos($current_path, '/modules/settings') !== false)
                 <span class="material-symbols-outlined text-[15px]">subdirectory_arrow_right</span>
                 <span class="text-xs font-medium">DOH-JBL-CMC</span>
             </a>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'ips_outsourced' ? 'bg-violet-500/10 text-violet-500 font-bold' : 'text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white' ?>"
+                href="<?= BASE_URL ?>/modules/ips_outsourced/" title="Outsourced / Donated IPs (JBL-OS-)">
+                <span class="material-symbols-outlined text-[15px]">handshake</span>
+                <span class="text-xs font-medium">Outsourced IPs</span>
+            </a>
         <?php endif; ?>
 
         <?php if (canAccessModule('computers')): ?>
@@ -148,6 +157,14 @@ elseif (strpos($current_path, '/modules/settings') !== false)
                 href="<?= BASE_URL ?>/modules/doh_jbl_cmc/" title="DOH-JBL Children's Medical Center">
                 <span class="material-symbols-outlined text-[15px]">subdirectory_arrow_right</span>
                 <span class="text-xs font-medium">DOH-JBL-CMC</span>
+            </a>
+        <?php endif; ?>
+
+        <?php if (canAccessModule('computers')): ?>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'outsourced' ? 'bg-violet-500/10 text-violet-500 font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/outsourced/" title="Outsourced / Donated Computers (JBL-OS-)">
+                <span class="material-symbols-outlined text-[15px]">subdirectory_arrow_right</span>
+                <span class="text-xs font-medium">Outsourced</span>
             </a>
         <?php endif; ?>
 

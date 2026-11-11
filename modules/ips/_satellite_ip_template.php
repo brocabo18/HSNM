@@ -517,6 +517,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
 // ── 7. Filtering, Searching & Pagination ──────────────────────────────────────
 $search      = trim($_GET['search'] ?? '');
+if (strpos($search, ':') !== false) {
+    $search = str_replace(':', '-', $search);
+}
 $status_f    = trim($_GET['status'] ?? 'All');
 $dev_type_f  = trim($_GET['device_type'] ?? 'All');
 $dept_f      = trim($_GET['department'] ?? 'All');

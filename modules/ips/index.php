@@ -776,7 +776,11 @@ $offline_ips   = $pdo->query("SELECT COUNT(*) FROM ips WHERE status = 'offline'"
 $reserved_ips  = $pdo->query("SELECT COUNT(*) FROM ips WHERE status = 'reserved'")->fetchColumn();
 
 // Filters
-$search_term = $_GET['search'] ?? '';
+$search_term = trim($_GET['search'] ?? '');
+// Convert colons to hyphens when searching (for MAC addresses e.g. 00:1A:2B:3C:4D:5E -> 00-1A-2B-3C-4D-5E)
+if (strpos($search_term, ':') !== false) {
+    $search_term = str_replace(':', '-', $search_term);
+}
 $filter_subnet = $_GET['subnet'] ?? 'All';
 $filter_status = $_GET['status'] ?? 'All';
 $sort_by = $_GET['sort'] ?? 'ip_asc';
@@ -1467,7 +1471,7 @@ require_once '../../includes/sidebar.php';
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <input type="text" name="ip_address" placeholder="IP Address" required
                         class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
-                    <input type="text" name="mac_address" placeholder="MAC Address"
+                    <input type="text" name="mac_address" placeholder="MAC Address (00-11-22-33-44-55)"
                         class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
                     <input type="text" name="hostname" placeholder="Hostname"
                         class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
@@ -1577,7 +1581,7 @@ require_once '../../includes/sidebar.php';
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-slate-400 mb-1">MAC Address</label>
-                        <input type="text" name="mac_address" id="edit_mac_address"
+                        <input type="text" name="mac_address" id="edit_mac_address" placeholder="00-11-22-33-44-55"
                             class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
                     </div>
                     <div>
@@ -1723,7 +1727,7 @@ require_once '../../includes/sidebar.php';
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-slate-400 mb-1">MAC Address</label>
-                        <input type="text" name="mac_address" id="bulk_edit_mac_address"
+                        <input type="text" name="mac_address" id="bulk_edit_mac_address" placeholder="00-11-22-33-44-55"
                             class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-4 py-2.5">
                     </div>
                     <div>
@@ -1897,6 +1901,13 @@ require_once '../../includes/sidebar.php';
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
         searchInput.addEventListener('input', function () {
+            // Auto-convert ':' to '-' for MAC address searches
+            if (this.value.includes(':')) {
+                const start = this.selectionStart;
+                const end = this.selectionEnd;
+                this.value = this.value.replace(/:/g, '-');
+                if (start !== null) this.setSelectionRange(start, end);
+            }
             clearTimeout(searchTimeout);
             const form = searchInput.form;
 
@@ -2207,6 +2218,17 @@ require_once '../../includes/sidebar.php';
             window.print();
         }, 500);
     }
+
+    // Auto-convert ':' to '-' on MAC address input fields
+    document.querySelectorAll('input[name="mac_address"], #edit_mac_address, #bulk_edit_mac_address').forEach(el => {
+        el.addEventListener('input', function() {
+            if (this.value.includes(':')) {
+                const start = this.selectionStart, end = this.selectionEnd;
+                this.value = this.value.replace(/:/g, '-').toUpperCase();
+                if (start !== null) this.setSelectionRange(start, end);
+            }
+        });
+    });
 </script>
 
 <!-- Print Styles -->

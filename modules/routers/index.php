@@ -377,7 +377,10 @@ $warning_routers = $pdo->query("SELECT COUNT(*) FROM routers WHERE status = 'War
 $maint_routers = $pdo->query("SELECT COUNT(*) FROM routers WHERE status = 'Maintenance'")->fetchColumn();
 
 // Filters
-$search_term = $_GET['search'] ?? '';
+$search_term = trim($_GET['search'] ?? '');
+if (strpos($search_term, ':') !== false) {
+    $search_term = str_replace(':', '-', $search_term);
+}
 $filter_status = $_GET['status'] ?? 'All';
 $filter_location = $_GET['location'] ?? 'All';
 $sort_by = $_GET['sort'] ?? 'id_desc';
