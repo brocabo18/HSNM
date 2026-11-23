@@ -251,7 +251,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <p class="text-center text-xs text-slate-500 mt-8 flex items-center justify-center gap-2">
             <span>&copy; <?= date('Y') ?> IHOMS-MIKE. All rights reserved.</span>
             <span class="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-slate-100 dark:bg-[#1a2130] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-[#232b3d]">
-                <?= $pdo ? getAppVersion($pdo) : 'v1.15.2' ?>
+                <?= $pdo ? getAppVersion($pdo) : 'v1.16.0' ?>
             </span>
         </p>
     </div>
