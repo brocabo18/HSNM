@@ -1,7 +1,7 @@
 # Hardware & Security Network Management (HSNM)
 ## Official Operations & User Manual (SOP Manual)
-**Version:** v1.15.6  
-**Last Updated:** November 11, 2026  
+**Version:** v1.16.0  
+**Last Updated:** November 23, 2026  
 **Target Audience:** Hospital IT Staff, Network Administrators, Property Custodians, and Technical Support Personnel  
 **Web Portal:** `http://ihoms/HSNM` *(or `http://192.163.10.11/HSNM`)*
 
@@ -19,6 +19,8 @@
    - [3.4 Computer Lifecycle & Maintenance Status](#34-computer-lifecycle--maintenance-status)
    - [3.5 Excel & CSV Exporting & Printing](#35-excel--csv-exporting--printing)
    - [3.6 Bulk CSV Importing](#36-bulk-csv-importing)
+   - [3.7 Supervisor Approval Queue (SOP)](#37-supervisor-approval-queue-sop)
+   - [3.8 Trash & Restore (Soft-Delete Recycle Bin)](#38-trash--restore-soft-delete-recycle-bin)
 4. [Multi-Facility Satellite Management (JASMC-ST, JASMC-VT, DOH-JBL-CMC)](#4-multi-facility-satellite-management-jasmc-st-jasmc-vt-doh-jbl-cmc)
    - [4.1 Satellite Workstation Inventories](#41-satellite-workstation-inventories)
    - [4.2 Satellite IP Address Inventories](#42-satellite-ip-address-inventories)
@@ -126,16 +128,21 @@ Accessible via **Sidebar → Computers** (`/modules/computers/`).
 ### 3.2 Adding a New Computer
 1. Click **+ Add Computer** in the top right.
 2. Fill out the sectioned modal:
-   - **General Information**: Select Building, Floor, enter Department, End User full name, MR/PAR number, and unique Control Number.
+   - **General Information**: Select Building, Floor, enter Department, End User full name, MR/PAR number, and unique **Control Number**.
+     - Use the **Control Number prefix dropdown** to select a department prefix (e.g., `JBL-IHO-PC`). After selecting a prefix and moving to the next field, the system **auto-detects** the next available sequential number for that prefix. You can also click the **🪄 wand button** to trigger auto-detect manually.
    - **Status**: Choose `Working` or `Maintenance`.
    - **System Unit**: Enter Brand/Model (*e.g., Lenovo ThinkCentre M70q*) and Serial Number.
    - **Core Specs**: Specify Processor (*e.g., Intel Core i7-11700*), RAM Memory (*e.g., 16GB DDR4*), and Storage (*e.g., 512GB NVMe SSD*).
    - **Peripherals**: Enter Monitor model/serial, Keyboard/Mouse, and select assigned Printers, Scanners, and AVR/UPS units.
    - **Software & Licenses**: Choose Operating System, enter OS Key, License status, and Microsoft Office details.
-   - **Network & Security**: Assign static IP address, physical MAC address, Endpoint Secure status, and Firewall compliance.
+   - **Network & Security**: Assign static IP address, physical MAC address, **Endpoint Secure** status (required), and **Firewall** compliance (required).
    - **Personnel**: Select **Encoded By** and **Checked By**, audit date, and remarks.
+   - **Supervisor Confirmation** *(Admin users only)*: Select the confirming supervisor from the dropdown (admin-role users only) and check the confirmation checkbox. Both are **required** before submission.
 3. Click **Add Computer**.
-4. **Automatic Real-Time Sync**: The new machine is automatically copied into the **Asset Registry** via the background `syncComputerToAsset()` hook.
+4. **Pending Approval**: The submission is placed in the **Supervisor Approval Queue** (`pending_computers` table) with status `Pending`. It does **not** appear in the main inventory until an admin approves it.
+
+> [!IMPORTANT]
+> Control Number is a required field. It must be unique across all active (non-deleted) records. The auto-detect feature suggests the next available number for the selected prefix — always verify before submitting.
 
 ---
 
@@ -206,6 +213,61 @@ Workstations can now be explicitly placed into **`Maintenance`** status:
 2. Download the CSV template to verify expected header columns.
 3. Select your `.csv` file and click **Upload & Import**.
 4. The system validates unique control numbers and imports valid rows with duplicate warnings.
+
+---
+
+### 3.7 Supervisor Approval Queue (SOP)
+
+The Supervisor Approval Queue is accessible from the **sidebar** (amber badge shows the number of pending submissions). Access requires **Admin** or **Supervisor** role.
+
+```mermaid
+flowchart TD
+    A["User Submits Add Computer Form"] --> B["Row saved in pending_computers\n(status = Pending)"]
+    B --> C["Admin opens Supervisor Approval Queue"]
+    C --> D{Review Decision}
+    D -->|Approve| E["Row promoted to computers table\nAsset & IP modules auto-synced"]
+    D -->|Reject| F["approval_status = Rejected\nReview note recorded"]
+```
+
+**Step-by-Step:**
+1. Navigate to **Supervisor Approval** in the sidebar.
+2. The queue lists all submissions with status **Pending**, **Approved**, or **Rejected**.
+3. Click **Approve** on a pending row:
+   - The computer is added to the main inventory.
+   - IP address module and Asset Registry are automatically synchronized.
+4. Click **Reject** on a pending row:
+   - Enter a mandatory **Review Note** explaining the reason.
+   - The submission remains in the queue with status `Rejected` for the submitter to reference.
+
+> [!NOTE]
+> Only admin-role users appear in the **Confirmed-by-Supervisor** dropdown when adding a computer. Regular editor/viewer accounts do not appear in that list.
+
+---
+
+### 3.8 Trash & Restore (Soft-Delete Recycle Bin)
+
+The **Trash** module is accessible from the **sidebar** (red badge shows the number of deleted items). Access requires **Admin** or **Editor** role.
+
+**How Soft-Delete Works:**
+- Clicking the **Delete** button on a computer does NOT permanently remove it. The record is marked with `deleted_at` and `deleted_by` and hidden from all views, exports, and duplicate checks.
+- The record appears in the **Trash** module until restored or permanently deleted.
+
+**Step-by-Step — Restoring a Deleted Computer:**
+1. Navigate to **Trash** in the sidebar.
+2. Find the computer to restore (use search or scroll by deletion date).
+3. Click **Restore** — the computer reappears in the main inventory immediately. IP and Asset records are re-synced automatically.
+
+**Step-by-Step — Permanently Deleting (Admin Only):**
+1. Navigate to **Trash** in the sidebar.
+2. Click **Permanent Delete** on a row — a confirmation dialog appears.
+3. Confirm deletion. The row is **irreversibly removed** from the database and logged to the audit trail.
+
+**Bulk Actions (Admin Only):**
+- **Restore All** — restores every item in the trash in a single operation.
+- **Empty Trash** — permanently deletes every item in the trash. Use with caution.
+
+> [!CAUTION]
+> **Empty Trash** and **Permanent Delete** are irreversible. Always verify the records before using these actions. Only administrators have access to permanent delete operations.
 
 ---
 

@@ -44,8 +44,8 @@ $is_edit = isset($is_edit_form) && $is_edit_form;
     </div>
     <!-- Control Number -->
     <div>
-        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Control Number</label>
-        <input type="text" name="control_number"
+        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Control Number <span class="text-red-500">*</span></label>
+        <input type="text" name="control_number" required
             class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
     </div>
 </div>
@@ -177,17 +177,19 @@ $is_edit = isset($is_edit_form) && $is_edit_form;
             <input type="text" name="mac_address" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
         </div>
         <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure</label>
-            <select name="endpoint_secure" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
-                <option value="N">No</option>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure <span class="text-red-500">*</span></label>
+            <select name="endpoint_secure" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
+                <option value="">-- Select Yes/No --</option>
                 <option value="Y">Yes</option>
+                <option value="N">No</option>
             </select>
         </div>
         <div>
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall</label>
-            <select name="firewall" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
-                <option value="N">No</option>
+            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall <span class="text-red-500">*</span></label>
+            <select name="firewall" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
+                <option value="">-- Select Yes/No --</option>
                 <option value="Y">Yes</option>
+                <option value="N">No</option>
             </select>
         </div>
     </div>

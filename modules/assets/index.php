@@ -38,26 +38,56 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
 
 // ── CSV Template Download ─────────────────────────────────────────────────────
 if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="asset_inventory_template.csv"');
-    $out = fopen('php://output', 'w');
-    fputs($out, "\xEF\xBB\xBF");
-    fputcsv($out, [
-        'Control ID', 'Department', 'End User', 'Source', 'MR/ICS', 'Item Code', 'Cost',
-        'Brand/Model', 'Serial Number', 'PTR Number', 'Processor', 'Memory', 'Storage', 'GPU',
-        'Monitor', 'Monitor S/N', 'Printer', 'Printer S/N', 'UPS/AVR', 'UPS/AVR S/N',
-        'Keyboard/Mouse', 'OS Version', 'OS Licensed', 'IP Address', 'MAC Address',
-        'MS Office', 'MS Office Licensed', 'Anti-Virus', 'Scan Date', 'Status', 'Remarks', 'Encoded By'
-    ]);
-    fputcsv($out, [
-        'AST-2026-001', 'IHOMS', 'Juan Dela Cruz', 'Purchased', 'PAR-001', 'ITEM-123', '45000',
-        'Dell OptiPlex 7090', 'SN12345678', 'PTR-001', 'Intel Core i7-11700', '16GB DDR4', '512GB NVMe SSD', 'Intel UHD Graphics',
-        'Dell 24" P2419H', 'MON-98765', 'Canon PIXMA G3010', 'PRN-54321', 'APC 650VA', 'UPS-11223',
-        'Logitech MK120', 'Windows 11 Pro 64-bit', 'Yes', '192.168.1.105', '00:1A:2B:3C:4D:5E',
-        'Microsoft Office 2021', 'Yes', 'Athena EPP', date('Y-m-d'), 'Active', 'Operational unit', 'Admin'
-    ]);
-    fclose($out);
-    exit;
+    $at_statuses = ['Active','Maintenance','Retired'];
+    $at_sources  = ['Purchased','Donation','Personal'];
+    $at_yesno    = ['Yes','No'];
+    $at_headers  = [
+        'Control ID','Department','End User','Source','MR/ICS','Item Code','Cost',
+        'Brand/Model','Serial Number','PTR Number','Processor','Memory','Storage','GPU',
+        'Monitor','Monitor S/N','Printer','Printer S/N','UPS/AVR','UPS/AVR S/N',
+        'Keyboard/Mouse','OS Version','OS Licensed','IP Address','MAC Address',
+        'MS Office','MS Office Licensed','Anti-Virus','Scan Date','Status','Remarks','Encoded By'
+    ];
+    $at_sample = [
+        'AST-2026-001','IHOMS','Juan Dela Cruz','Purchased','PAR-001','ITEM-123','45000',
+        'Dell OptiPlex 7090','SN12345678','PTR-001','Intel Core i7-11700','16GB DDR4','512GB NVMe SSD','Intel UHD Graphics',
+        'Dell 24" P2419H','MON-98765','Canon PIXMA G3010','PRN-54321','APC 650VA','UPS-11223',
+        'Logitech MK120','Windows 11 Pro 64-bit','Yes','192.168.1.105','00:1A:2B:3C:4D:5E',
+        'Microsoft Office 2021','Yes','Athena EPP',date('Y-m-d'),'Active','Operational unit','Admin'
+    ];
+    $at_xmlEsc = fn($v) => htmlspecialchars((string)$v, ENT_XML1|ENT_QUOTES,'UTF-8');
+    $at_ss=[]; $at_ssi=function(string $s) use (&$at_ss):int{ $k=array_search($s,$at_ss,true); if($k===false){$at_ss[]=$s;$k=count($at_ss)-1;} return $k; };
+    $at_numCols=count($at_headers); $at_cols=[];
+    for($i=0;$i<$at_numCols;$i++) $at_cols[]=$i<26?chr(65+$i):'A'.chr(65+$i-26);
+    $at_rows=[]; $at_hr=[]; foreach($at_headers as $h) $at_hr[]=$at_ssi($h); $at_rows[]=$at_hr;
+    $at_sr=[]; foreach($at_sample as $s) $at_sr[]=$at_ssi((string)$s); $at_rows[]=$at_sr;
+    $at_sxml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    $at_sxml.='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+    foreach($at_rows as $ri=>$row){ $rI=$ri+1; $at_sxml.="<row r=\"$rI\">";
+        foreach($row as $ci=>$v) $at_sxml.='<c r="'.$at_cols[$ci].$rI.'" t="s"><v>'.$v.'</v></c>'; $at_sxml.='</row>'; }
+    $at_sxml.='</sheetData>';
+    // Dropdowns: D=Source(3), W=OS Licensed(22), AA=MS Office Licensed(26), AD=Status(29)
+    $at_last=1001;
+    $at_sxml.='<dataValidations count="4">';
+    $at_sxml.='<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Source" error="Select a source." sqref="D2:D'.$at_last.'"><formula1>'.$at_xmlEsc('"'.implode(',', $at_sources).'"').'</formula1></dataValidation>';
+    $at_sxml.='<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Value" error="Enter Yes or No." sqref="W2:W'.$at_last.'"><formula1>'.$at_xmlEsc('"'.implode(',', $at_yesno).'"').'</formula1></dataValidation>';
+    $at_sxml.='<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Value" error="Enter Yes or No." sqref="AA2:AA'.$at_last.'"><formula1>'.$at_xmlEsc('"'.implode(',', $at_yesno).'"').'</formula1></dataValidation>';
+    $at_sxml.='<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Status" error="Select a valid status." sqref="AD2:AD'.$at_last.'"><formula1>'.$at_xmlEsc('"'.implode(',', $at_statuses).'"').'</formula1></dataValidation>';
+    $at_sxml.='</dataValidations></worksheet>';
+    $at_ssxml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'.count($at_ss).'" uniqueCount="'.count($at_ss).'">'; foreach($at_ss as $s) $at_ssxml.='<si><t xml:space="preserve">'.$at_xmlEsc($s).'</t></si>'; $at_ssxml.='</sst>';
+    $at_styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>';
+    $at_wb='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Asset Template" sheetId="1" r:id="rId1"/></sheets></workbook>';
+    $at_wbr='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+    $at_rr='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+    $at_ct='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>';
+    $at_tmp=tempnam(sys_get_temp_dir(),'assets_tpl_').'.xlsx'; $at_z=new ZipArchive(); $at_z->open($at_tmp,ZipArchive::CREATE|ZipArchive::OVERWRITE);
+    $at_z->addFromString('[Content_Types].xml',$at_ct); $at_z->addFromString('_rels/.rels',$at_rr);
+    $at_z->addFromString('xl/workbook.xml',$at_wb); $at_z->addFromString('xl/_rels/workbook.xml.rels',$at_wbr);
+    $at_z->addFromString('xl/worksheets/sheet1.xml',$at_sxml); $at_z->addFromString('xl/sharedStrings.xml',$at_ssxml);
+    $at_z->addFromString('xl/styles.xml',$at_styles); $at_z->close();
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="asset_inventory_template.xlsx"');
+    header('Content-Length: '.filesize($at_tmp)); readfile($at_tmp); unlink($at_tmp); exit;
 }
 
 // ── CSV Export ────────────────────────────────────────────────────────────────
@@ -209,22 +239,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     } catch (Exception $e) { $error_msg = 'Error: ' . $e->getMessage(); }
 }
 
+// ── XLSX helper (no external library) ────────────────────────────────────────
+if (!function_exists('readXlsxRows')) {
+    function readXlsxRows(string $path): array {
+        $z = new ZipArchive();
+        if ($z->open($path) !== true) return [];
+        $ssXml = $z->getFromName('xl/sharedStrings.xml');
+        $ss = [];
+        if ($ssXml !== false) {
+            $dom = new SimpleXMLElement($ssXml);
+            foreach ($dom->si as $si) { $ss[] = (string)($si->t ?? implode('', (array)$si->r->t)); }
+        }
+        $wsXml = $z->getFromName('xl/worksheets/sheet1.xml');
+        $z->close();
+        if ($wsXml === false) return [];
+        $rows = [];
+        $dom2 = new SimpleXMLElement($wsXml);
+        $ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+        foreach ($dom2->children($ns)->sheetData->children($ns)->row as $row) {
+            $cells = []; $prevCol = -1;
+            foreach ($row->children($ns)->c as $c) {
+                $ref = (string)$c['r'];
+                preg_match('/^([A-Z]+)/', $ref, $m);
+                $col = 0; foreach (str_split($m[1]) as $ch) $col = $col*26 + (ord($ch)-64);
+                $col--;
+                while ($prevCol < $col-1) { $cells[] = ''; $prevCol++; }
+                $t = (string)($c['t'] ?? '');
+                $v = (string)($c->children($ns)->v ?? '');
+                $cells[] = ($t === 's') ? ($ss[(int)$v] ?? '') : $v;
+                $prevCol = $col;
+            }
+            $rows[] = $cells;
+        }
+        return $rows;
+    }
+}
+
 // ── Import Assets CSV ─────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'import_assets_csv') {
     if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
         $error_msg = 'Please upload a valid CSV file.';
     } else {
         $file_path = $_FILES['csv_file']['tmp_name'];
-        if (($handle = fopen($file_path, 'r')) !== FALSE) {
-            $bom = fread($handle, 3);
-            if ($bom !== "\xEF\xBB\xBF") {
-                rewind($handle);
+        $orig_name = strtolower($_FILES['csv_file']['name'] ?? '');
+        $is_xlsx   = str_ends_with($orig_name, '.xlsx');
+        if ($is_xlsx) {
+            $xlsx_rows    = readXlsxRows($file_path);
+            $raw_headers  = array_shift($xlsx_rows) ?: [];
+            $xlsx_data_ok = count($raw_headers) > 0;
+        }
+        if ((!$is_xlsx && ($handle = fopen($file_path, 'r')) !== FALSE) || $is_xlsx) {
+            if (!$is_xlsx) {
+                $bom = fread($handle, 3);
+                if ($bom !== "\xEF\xBB\xBF") rewind($handle);
+                $raw_headers = fgetcsv($handle);
             }
-
-            $raw_headers = fgetcsv($handle);
-            if ($raw_headers === FALSE) {
-                $error_msg = 'The uploaded CSV file is empty.';
-                fclose($handle);
+            if (empty($raw_headers)) {
+                $error_msg = 'The uploaded file is empty.';
+                if (!$is_xlsx) fclose($handle);
             } else {
                 $header_map = [];
                 foreach ($raw_headers as $idx => $hdr) {
@@ -271,7 +343,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
                 $updated = 0;
                 $skipped = 0;
 
-                while (($row = fgetcsv($handle)) !== FALSE) {
+                $xlsx_row_idx = 0;
+                while (true) {
+                    if ($is_xlsx) {
+                        if ($xlsx_row_idx >= count($xlsx_rows)) break;
+                        $row = $xlsx_rows[$xlsx_row_idx++];
+                    } else {
+                        $row = fgetcsv($handle);
+                        if ($row === FALSE) break;
+                    }
                     $row = array_map(function($val) {
                         $val = trim((string)$val);
                         if (!mb_check_encoding($val, 'UTF-8')) {
@@ -480,7 +560,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
                         $skipped++;
                     }
                 }
-                fclose($handle);
+                if (!$is_xlsx) fclose($handle);
 
                 $msg_parts = ["Imported $imported new assets"];
                 if ($updated > 0) $msg_parts[] = "$updated existing assets updated";
@@ -854,7 +934,7 @@ if (!$is_ajax) {
     <div class="bg-white dark:bg-[#1a2130] rounded-2xl shadow-2xl w-full max-w-lg p-6">
         <div class="flex items-center justify-between border-b border-slate-200 dark:border-[#232b3d] pb-3 mb-4">
             <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span class="material-symbols-outlined text-amber-600">upload_file</span> Import Assets from CSV
+                <span class="material-symbols-outlined text-amber-600">upload_file</span> Import Assets
             </h3>
             <button type="button" onclick="toggleModal('importCsvModal')" class="text-slate-400 hover:text-slate-600 dark:hover:text-white">
                 <span class="material-symbols-outlined">close</span>
@@ -866,8 +946,8 @@ if (!$is_ajax) {
             <input type="hidden" name="action" value="import_assets_csv">
 
             <div>
-                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select CSV File</label>
-                <input type="file" name="csv_file" accept=".csv" required
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select File <span class="normal-case font-normal text-slate-400">(.xlsx or .csv)</span></label>
+                <input type="file" name="csv_file" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required
                     class="w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500/10 file:text-amber-600 hover:file:bg-amber-500/20 file:cursor-pointer border border-slate-200 dark:border-[#232b3d] rounded-xl p-2 bg-slate-50 dark:bg-[#101622]">
             </div>
 
@@ -875,13 +955,19 @@ if (!$is_ajax) {
                 <p class="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                     <span class="material-symbols-outlined text-[16px] text-amber-500">info</span> Supported Formats:
                 </p>
-                <p>&bull; Standard Asset Inventory CSV format or Computer Inventory CSV format.</p>
+                <p>&bull; <span class="font-semibold text-slate-700 dark:text-slate-300">.xlsx</span> — Excel template with built-in dropdown lists <span class="text-emerald-500 font-bold">(recommended)</span></p>
+                <p>&bull; <span class="font-semibold text-slate-700 dark:text-slate-300">.csv</span> — Standard Asset Inventory CSV or Computer Inventory CSV format.</p>
                 <p>&bull; Existing assets matching Control ID will be updated automatically.</p>
                 <p>&bull; IP &amp; MAC addresses will automatically register in the IP Module as Active.</p>
-                <div class="pt-2">
-                    <a href="?download_template=csv" class="inline-flex items-center gap-1 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
-                        <span class="material-symbols-outlined text-[14px]">download</span> Download CSV Template
+                <div class="pt-2 border-t border-slate-200 dark:border-[#232b3d] mt-2 flex flex-col gap-1.5">
+                    <a href="?download_template=csv" class="inline-flex items-center gap-1.5 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
+                        <span class="material-symbols-outlined text-[15px]">download</span> Download Import Template (.xlsx)
                     </a>
+                    <div class="text-[10px] text-slate-400 dark:text-slate-500 pl-6 leading-5">
+                        <span class="inline-flex items-center gap-1"><span class="material-symbols-outlined text-[11px] text-amber-400">arrow_drop_down_circle</span> Col D: <strong>Source</strong> (Purchased/Donation/Personal)</span><br>
+                        <span class="inline-flex items-center gap-1"><span class="material-symbols-outlined text-[11px] text-amber-400">arrow_drop_down_circle</span> Col W: <strong>OS Licensed</strong> &amp; Col AA: <strong>MS Office Licensed</strong> (Yes/No)</span><br>
+                        <span class="inline-flex items-center gap-1"><span class="material-symbols-outlined text-[11px] text-amber-400">arrow_drop_down_circle</span> Col AD: <strong>Status</strong> (Active/Maintenance/Retired)</span>
+                    </div>
                 </div>
             </div>
 

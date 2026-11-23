@@ -184,14 +184,76 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 
 // ── 4. CSV Template Download ──────────────────────────────────────────────────
 if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="'.$SATELLITE_KEY.'_ips_template.csv"');
-    $output = fopen('php://output', 'w');
-    fputs($output, "\xEF\xBB\xBF");
-    fputcsv($output, ['IP Address', 'MAC Address', 'Hostname', 'Control Number', 'Department', 'Location', 'End User', 'Status', 'Device Type', 'Description', 'Remarks']);
-    fputcsv($output, ['192.170.10.100', '00-1A-2B-3C-4D-5E', 'SATELLITE-PC01', $MODULE_LABEL.'-PC01', $MODULE_LABEL.' / ADMIN', $MODULE_LABEL.' GF', 'Juan Dela Cruz', 'active', 'Workstation', 'Admin PC', 'In service']);
-    fclose($output);
-    exit;
+    $tpl_headers = ['IP Address','MAC Address','Hostname','Control Number','Department','Location','End User','Status','Device Type','Description','Remarks'];
+    $tpl_sample  = [
+        '192.170.10.100','00-1A-2B-3C-4D-5E','SATELLITE-PC01',$MODULE_LABEL.'-PC01',
+        $MODULE_LABEL.' / ADMIN',$MODULE_LABEL.' GF','Juan Dela Cruz','active','Workstation','Admin PC','In service'
+    ];
+    $tpl_xmlEsc = fn($v) => htmlspecialchars((string)$v, ENT_XML1|ENT_QUOTES,'UTF-8');
+    $tpl_ss=[]; $tpl_ssi=function(string $s) use (&$tpl_ss):int{ $k=array_search($s,$tpl_ss,true); if($k===false){$tpl_ss[]=$s;$k=count($tpl_ss)-1;} return $k; };
+    $tpl_numCols=count($tpl_headers); $tpl_cols=[];
+    for($i=0;$i<$tpl_numCols;$i++) $tpl_cols[]=$i<26?chr(65+$i):'A'.chr(65+$i-26);
+    $tpl_rows=[]; $tpl_hr=[]; foreach($tpl_headers as $h) $tpl_hr[]=$tpl_ssi($h); $tpl_rows[]=$tpl_hr;
+    $tpl_sr=[]; foreach($tpl_sample as $s) $tpl_sr[]=$tpl_ssi((string)$s); $tpl_rows[]=$tpl_sr;
+    $tpl_sxml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    $tpl_sxml.='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+    foreach($tpl_rows as $ri=>$row){ $rI=$ri+1; $tpl_sxml.="<row r=\"$rI\">";
+        foreach($row as $ci=>$v) $tpl_sxml.='<c r="'.$tpl_cols[$ci].$rI.'" t="s"><v>'.$v.'</v></c>'; $tpl_sxml.='</row>'; }
+    $tpl_sxml.='</sheetData>';
+    $tpl_sxml.='<dataValidations count="2">';
+    $tpl_sxml.='<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Status" error="Select a valid status." sqref="H2:H1001"><formula1>'.$tpl_xmlEsc('"'.implode(',',['active','available','offline','maintenance','reserved']).'"').'</formula1></dataValidation>';
+    $tpl_sxml.='<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Device Type" error="Select a device type." sqref="I2:I1001"><formula1>'.$tpl_xmlEsc('"'.implode(',',['Workstation','Laptop','Printer','Server','Switch','Router','IP Phone','CCTV','Other']).'"').'</formula1></dataValidation>';
+    $tpl_sxml.='</dataValidations>';
+    $tpl_sxml.='</worksheet>';
+    $tpl_ssxml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'.count($tpl_ss).'" uniqueCount="'.count($tpl_ss).'">'; foreach($tpl_ss as $s) $tpl_ssxml.='<si><t xml:space="preserve">'.$tpl_xmlEsc($s).'</t></si>'; $tpl_ssxml.='</sst>';
+    $tpl_styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>';
+    $tpl_wb='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="IP Template" sheetId="1" r:id="rId1"/></sheets></workbook>';
+    $tpl_wbr='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+    $tpl_rr='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+    $tpl_ct='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>';
+    $tpl_tmp=tempnam(sys_get_temp_dir(),'$SATELLITE_KEY_tpl_').'.xlsx'; $tpl_z=new ZipArchive(); $tpl_z->open($tpl_tmp,ZipArchive::CREATE|ZipArchive::OVERWRITE);
+    $tpl_z->addFromString('[Content_Types].xml',$tpl_ct); $tpl_z->addFromString('_rels/.rels',$tpl_rr);
+    $tpl_z->addFromString('xl/workbook.xml',$tpl_wb); $tpl_z->addFromString('xl/_rels/workbook.xml.rels',$tpl_wbr);
+    $tpl_z->addFromString('xl/worksheets/sheet1.xml',$tpl_sxml); $tpl_z->addFromString('xl/sharedStrings.xml',$tpl_ssxml);
+    $tpl_z->addFromString('xl/styles.xml',$tpl_styles); $tpl_z->close();
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="'.$SATELLITE_KEY.'_ips_import_template.xlsx"');
+    header('Content-Length: '.filesize($tpl_tmp)); readfile($tpl_tmp); unlink($tpl_tmp); exit;
+}
+
+if (!function_exists('readXlsxRows')) {
+    function readXlsxRows(string $path): array {
+        $z = new ZipArchive();
+        if ($z->open($path) !== true) return [];
+        $ssXml = $z->getFromName('xl/sharedStrings.xml');
+        $ss = [];
+        if ($ssXml !== false) {
+            $dom = new SimpleXMLElement($ssXml);
+            foreach ($dom->si as $si) { $ss[] = (string)($si->t ?? implode('', (array)$si->r->t)); }
+        }
+        $wsXml = $z->getFromName('xl/worksheets/sheet1.xml');
+        $z->close();
+        if ($wsXml === false) return [];
+        $rows = [];
+        $dom2 = new SimpleXMLElement($wsXml);
+        $ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+        foreach ($dom2->children($ns)->sheetData->children($ns)->row as $row) {
+            $cells = []; $prevCol = -1;
+            foreach ($row->children($ns)->c as $c) {
+                $ref = (string)$c['r'];
+                preg_match('/^([A-Z]+)/', $ref, $m);
+                $col = 0; foreach (str_split($m[1]) as $ch) $col = $col*26 + (ord($ch)-64);
+                $col--;
+                while ($prevCol < $col-1) { $cells[] = ''; $prevCol++; }
+                $t = (string)($c['t'] ?? '');
+                $v = (string)($c->children($ns)->v ?? '');
+                $cells[] = ($t === 's') ? ($ss[(int)$v] ?? '') : $v;
+                $prevCol = $col;
+            }
+            $rows[] = $cells;
+        }
+        return $rows;
+    }
 }
 
 // ── 5. AJAX Ping Handler ──────────────────────────────────────────────────────
@@ -1181,7 +1243,7 @@ require_once __DIR__ . '/../../includes/sidebar.php';
 
             <div>
                 <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Select CSV File</label>
-                <input type="file" name="csv_file" accept=".csv" required
+                <input type="file" name="csv_file" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required
                     class="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-800 dark:text-slate-200 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary file:text-white file:text-xs file:font-semibold">
             </div>
 

@@ -29,6 +29,20 @@ if (isset($_SESSION['user_id']) && function_exists('canAccessModule')) {
                 exit;
             }
         }
+        // Special case: Supervisor Approval (Admin/Supervisor role only, not in per-user module list)
+        elseif ($module === 'supervisor_approval') {
+            if (!in_array($_SESSION['role'] ?? '', ['admin', 'supervisor'])) {
+                header("Location: " . BASE_URL);
+                exit;
+            }
+        }
+        // Special case: Trash (admin and editor can access)
+        elseif ($module === 'trash') {
+            if (!in_array($_SESSION['role'] ?? '', ['admin', 'editor'])) {
+                header("Location: " . BASE_URL);
+                exit;
+            }
+        }
         // Standard modules
         elseif (!canAccessModule($module)) {
             header("Location: " . BASE_URL);

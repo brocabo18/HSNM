@@ -1,6 +1,6 @@
 # HSNM — System Walkthrough Guide
 
-[![Version](https://img.shields.io/badge/version-1.15.6-blue.svg)](modules/changelog/)
+[![Version](https://img.shields.io/badge/version-1.16.0-blue.svg)](modules/changelog/)
 [![PHP](https://img.shields.io/badge/PHP-8.1+-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v3-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
@@ -32,6 +32,8 @@
    - [7.11 Hospital Auxiliaries (Printers, PABX, Queueing TV, ICS, Links)](#711-hospital-auxiliaries-printers-pabx-queueing-tv-ics-links)
    - [7.12 Administration, Auditing & Reports (Logs, Settings, Changelog, Reports)](#712-administration-auditing--reports-logs-settings-changelog-reports)
    - [7.13 Cloud Database Synchronization Engine 2.0 (`sync_neon.php`)](#713-cloud-database-synchronization-engine-20-sync_neonphp)
+   - [7.14 Supervisor Approval Queue (`modules/supervisor_approval/`)](#714-supervisor-approval-queue-modulessupervisor_approval)
+   - [7.15 Trash / Recycle Bin (`modules/trash/`)](#715-trash--recycle-bin-modulestrash)
 8. [Database Schema & Data Dictionary (All 22 Tables)](#8-database-schema--data-dictionary-all-22-tables)
 9. [Back-End Architectural Patterns](#9-back-end-architectural-patterns)
 10. [Security Hardening & Zero-Hardcoding Architecture](#10-security-hardening--zero-hardcoding-architecture)
@@ -309,8 +311,18 @@ The primary workstation inventory tracking all desktop computers and laptops in 
   3. *Core Hardware Specs* (Processor, RAM Memory, Storage)
   4. *Peripherals* (Monitor/SN, Mouse/SN, Keyboard/SN, Printer multi-select, Scanner, AVR/UPS)
   5. *System & Software* (OS, OS Key, License, MS Office, Office Email)
-  6. *Network & Security* (IP Address, MAC Address, Endpoint Secure, Firewall)
+  6. *Network & Security* (IP Address, MAC Address, **Endpoint Secure** *(required)*, **Firewall** *(required)*)
   7. *Personnel & Remarks* (Checked By, Encoded By, Remarks Date, Remarks text)
+  8. *Supervisor Confirmation* *(Admin only — required)* (Confirming supervisor dropdown ← admin-role users only; confirmation checkbox)
+- **Smart Control Number Auto-Detect** (v1.16.0):
+  - A **prefix dropdown** lists all 53 `JBL-*-PC` department prefixes.
+  - On focus-leave (blur), PHP AJAX handler queries `MAX(control_number)` for that prefix (excluding soft-deleted rows) using `preg_match('/^(.*?)(\d+)$/')` to split the alphanumeric suffix from the numeric counter.
+  - The **🪄 wand button** triggers the same auto-detect manually.
+  - Example: existing max is `JBL-PHAR-PC025` → system suggests `JBL-PHAR-PC026`.
+- **Pending Approval Flow** (v1.16.0):
+  New submissions go to `pending_computers` (not `computers`) with `approval_status = 'Pending'`. The record enters `computers` only after an admin approves it in the Supervisor Approval Queue.
+- **Soft-Delete** (v1.16.0):
+  Delete sets `deleted_at = NOW()` / `deleted_by = username` instead of a hard `DELETE`. All `SELECT`, export, and duplicate-check queries include `WHERE deleted_at IS NULL`. Deleted records are recoverable from the Trash module.
 - **Automated Workstation-to-Asset Hook**:
   Every insert and update calls `syncComputerToAsset($pdo, $id)` in `config.php`, automatically upserting the workstation into `assets`.
 
@@ -496,6 +508,97 @@ Connects local PostgreSQL with remote Neon Serverless PostgreSQL for off-site ba
 - **Match-Key Conflict Resolution**: For tables with natural keys (e.g., `control_number`, `ip_address`, `username`, `control_id`), updates existing rows using `match` columns to resolve unique constraint collisions.
 - **Bi-Directional Deletion Reconciliation**: Tracks deleted rows using a max ID watermark heuristic. When enabled via the **Allow Deletion Sync** option, rows purged locally are safely purged on the remote instance.
 - **Full 22-Table Coverage**: Synchronizes all inventory, satellite, licensing, and configuration tables in topological dependency order.
+
+---
+
+### 7.14 Supervisor Approval Queue (`modules/supervisor_approval/`)
+
+New in **v1.16.0**. Implements a **four-eyes principle** for all new computer submissions.
+
+#### Architecture
+- **Staging table:** `pending_computers` — mirrors all columns of `computers` plus `approval_status` (`Pending`/`Approved`/`Rejected`), `reviewed_by TIMESTAMPTZ`, `reviewed_at`, and `review_note TEXT`.
+- **SQL migration:** `database/add_supervisor_approval.sql`.
+- **Access control:** `header.php` special-cases `supervisor_approval` module to allow `admin` and `supervisor` roles, bypassing the standard `canAccessModule()` JSONB check.
+- **Sidebar:** Amber badge renders live count: `SELECT COUNT(*) FROM pending_computers WHERE approval_status='Pending'`.
+
+#### Approval Flow
+```mermaid
+sequenceDiagram
+    actor User as IT Staff
+    actor Admin as Admin / Supervisor
+    participant PendingDB as pending_computers
+    participant ComputersDB as computers
+
+    User->>PendingDB: Submit Add Computer form → INSERT (status=Pending)
+    Admin->>PendingDB: Opens Supervisor Approval Queue
+    Admin->>PendingDB: Clicks Approve
+    PendingDB->>ComputersDB: INSERT ... ON CONFLICT DO UPDATE
+    ComputersDB-->>Admin: syncComputerToAsset() + syncComputerIpToIpModule()
+    Note over PendingDB: approval_status → Approved
+```
+
+#### Reject Flow
+- Admin clicks **Reject**, enters mandatory review note.
+- `UPDATE pending_computers SET approval_status='Rejected', review_note=... WHERE id=...`
+- Submission stays visible in the queue with `Rejected` badge for reference.
+
+#### Supervisor Dropdown Population
+```php
+// Only admin-role users appear in the "Confirmed by Supervisor" dropdown
+$stmt = $pdo->query("SELECT username FROM users WHERE role = 'admin' ORDER BY username");
+$supervisor_users = $stmt->fetchAll(PDO::FETCH_COLUMN);
+```
+
+---
+
+### 7.15 Trash / Recycle Bin (`modules/trash/`)
+
+New in **v1.16.0**. Implements **soft-delete** semantics with full restore capability.
+
+#### Schema Changes
+```sql
+-- database/add_trash_module.sql
+ALTER TABLE computers ADD COLUMN deleted_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE computers ADD COLUMN deleted_by VARCHAR(100) DEFAULT NULL;
+
+CREATE TABLE trash_log (
+    id SERIAL PRIMARY KEY,
+    action VARCHAR(20) NOT NULL,       -- 'trash', 'restore', 'permanent_delete'
+    performed_by VARCHAR(100),
+    performed_at TIMESTAMPTZ DEFAULT NOW(),
+    computer_snapshot JSONB            -- full row snapshot at time of action
+);
+```
+
+#### Soft-Delete Pattern
+All existing hard-DELETEs in `modules/computers/index.php` are replaced:
+```php
+// Before (hard delete)
+$pdo->prepare("DELETE FROM computers WHERE id = ?")->execute([$id]);
+
+// After (soft delete — v1.16.0)
+$pdo->prepare("UPDATE computers SET deleted_at = NOW(), deleted_by = ? WHERE id = ?")
+    ->execute([$_SESSION['username'], $id]);
+```
+
+All SELECT queries, exports, duplicate checks, and auto-detect include:
+```sql
+WHERE deleted_at IS NULL
+```
+
+#### Access Control
+- `header.php` special-cases `trash` module: allows `admin` and `editor` roles.
+- **Permanent Delete** and **Empty Trash** are further restricted to `admin` only via in-module role check.
+- Sidebar: Red badge renders live count: `SELECT COUNT(*) FROM computers WHERE deleted_at IS NOT NULL`.
+
+#### Restore & Re-Sync
+```php
+// Restore clears soft-delete flags and re-syncs downstream tables
+$pdo->prepare("UPDATE computers SET deleted_at = NULL, deleted_by = NULL WHERE id = ?")
+    ->execute([$id]);
+syncComputerIpToIpModule($pdo, $id);
+syncComputerToAsset($pdo, $id);
+```
 
 ---
 

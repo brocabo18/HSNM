@@ -1,6 +1,6 @@
 # Hardware & Security Network Management (HSNM)
 
-[![Version](https://img.shields.io/badge/version-1.15.6-blue.svg)](modules/changelog/)
+[![Version](https://img.shields.io/badge/version-1.16.0-blue.svg)](modules/changelog/)
 [![PHP](https://img.shields.io/badge/PHP-8.1+-777BB4.svg?logo=php&logoColor=white)](https://www.php.net/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v3-38B2AC.svg?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
@@ -54,6 +54,8 @@
 - 📋 **System Changelog**: `http://ihoms/HSNM/modules/changelog/`
 - 🔄 **Cloud Data Sync (Neon)**: `http://ihoms/HSNM/sync_neon.php`
 - ⚙️ **User & Access Settings**: `http://ihoms/HSNM/modules/settings/`
+- ✅ **Supervisor Approval Queue**: `http://ihoms/HSNM/modules/supervisor_approval/` *(Admin/Supervisor only)*
+- 🗑️ **Trash / Recycle Bin**: `http://ihoms/HSNM/modules/trash/` *(Admin/Editor only)*
 
 ---
 
@@ -240,6 +242,28 @@ Developed and maintained by **IHOMS-MIKE** for hospital IT infrastructure operat
 ---
 
 ## 📋 Changelog
+
+### v1.16.0 — 2026-11-23
+**Supervisor Approval Workflow, Trash/Recycle Bin, Smart Control Number Auto-Detect & Security Hardening**
+
+- **New: `modules/supervisor_approval/`** — Full supervisor approval queue for newly submitted computers. Submissions from the Add Computer form are routed to `pending_computers` table first. Admins/Supervisors review expandable detail cards, then Approve (inserts into `computers`, syncs firewall/asset/IP) or Reject with a review note. Filter tabs: Pending / Approved / Rejected / All. Live amber badge count in sidebar.
+- **New: `modules/trash/`** — Recycle Bin / Soft-Delete module. Deleting a computer now sets `deleted_at` / `deleted_by` instead of permanently removing the row. Trashed records are hidden from main inventory, exports, and duplicate checks. Trash module lists all deleted computers with restore and permanent-delete actions. Bulk "Restore All" and "Empty Trash" for admins. Live red count badge in sidebar.
+- **New: `database/add_supervisor_approval.sql`** — Migration creating `pending_computers` table (40 columns + approval tracking fields + indexes).
+- **New: `database/add_trash_module.sql`** — Migration adding `deleted_at`/`deleted_by` to `computers` table and creating `trash_log` audit table with JSONB snapshot column.
+- **Feature: Supervisor Confirmation on Add Computer** — Add Computer modal now requires selecting a Confirmed-by-Supervisor (admin-role users only) and ticking a confirmation checkbox before submission. Both are required fields enforced client- and server-side.
+- **Feature: Endpoint Secure & Firewall dropdowns** — Default changed from `No` to `-- Select Yes/No --` placeholder; both fields are now required in Add and Edit Computer forms (including `_form_fields.php` shared form for satellite modules).
+- **Feature: Control Number required** — Control Number field is now required in Add and Edit Computer modals.
+- **Feature: Smart Control Number Auto-Detect** — Completely redesigned auto-detect system:
+  - **Prefix dropdown** (53 standard JBL prefixes) — selecting instantly fetches and fills the next available number.
+  - **Auto-detect on blur** — tab away from the field after typing a prefix and it auto-fills.
+  - **Wand button** — manual trigger retained for custom prefixes.
+  - **Fixed regex** — now correctly handles alphanumeric suffixes (e.g. `JBL-PHAR-PC025` → prefix `JBL-PHAR-PC`, next `JBL-PHAR-PC026`). Previously only pure-digit suffixes worked.
+  - **Prefix audit** — 56 real prefixes found in DB; `JBL-LAB-PC` (35 records) and `JBL-MHU-PC` (18 records) added to dropdown.
+- **Security: Access Control** — `includes/header.php` updated with special-case bypass for `supervisor_approval` (admin/supervisor) and `trash` (admin/editor) modules, bypassing the per-user `module_access` JSON check.
+- **UX: Sidebar** — Supervisor Approval link (amber badge) and Trash link (red badge) added under Computers section. Both visible only to authorized roles.
+- **Bug Fix: Edit handler validation** — Edit Computer handler now validates `endpoint_secure` and `firewall` as required fields.
+- **Bug Fix: Duplicate checks** — Add and Edit duplicate checks for control number, IP, and MAC now exclude soft-deleted records (`AND deleted_at IS NULL`).
+- **Data Quality** — Prefix audit identified 4 malformed control numbers: `JBL-CMC` (missing `-PC`), `JBL-EMD-PC003 (missing)` (stray text), `JBL-RAD-PC022 DUP` (stray ` DUP`), `n/aa` (placeholder). Requires manual cleanup.
 
 ### v1.15.6 — 2026-11-11
 **Outsourced Inventory Modules, Filter UX Fixes & MAC Search Normalization**

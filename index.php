@@ -126,8 +126,18 @@ $ip_utilization = $stats['ips']['total'] > 0 ? round(($stats['ips']['active'] / 
 
 // Fetch Recent Logs
 $logs = [];
+// $hasTable: PostgreSQL-compatible helper to check if a table exists in the public schema
+$hasTable = function(string $table) use ($pdo): bool {
+    try {
+        $s = $pdo->prepare("SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=?");
+        $s->execute([$table]);
+        return (bool)$s->fetchColumn();
+    } catch (Exception $e) {
+        return false;
+    }
+};
 try {
-    if ($pdo && !empty($hasTable) && $hasTable('audit_logs')) {
+    if ($pdo && $hasTable('audit_logs')) {
         $stmt = $pdo->query("SELECT al.*, u.username FROM audit_logs al LEFT JOIN users u ON al.user_id = u.id ORDER BY al.created_at DESC LIMIT 6");
         $logs = $stmt->fetchAll();
     }

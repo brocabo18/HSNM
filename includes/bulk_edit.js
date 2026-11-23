@@ -103,6 +103,7 @@
             '</div>'
         ].join('');
 
+        bar.className = 'no-print';
         bar.style.cssText = [
             'display:none;',
             'position:fixed;',

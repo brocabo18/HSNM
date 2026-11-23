@@ -19,10 +19,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
     };
 
     // IDs filter (selective export)
-    $where_sql = '1=1'; $params = [];
+    $where_sql = 'deleted_at IS NULL'; $params = [];
     if (isset($_GET['ids']) && !empty($_GET['ids'])) {
         $ids = array_filter(explode(',', $_GET['ids']), 'is_numeric');
-        if (!empty($ids)) { $placeholders = implode(',', array_fill(0, count($ids), '?')); $where_sql = "id IN ($placeholders)"; $params = array_values($ids); }
+        if (!empty($ids)) { $placeholders = implode(',', array_fill(0, count($ids), '?')); $where_sql = "deleted_at IS NULL AND id IN ($placeholders)"; $params = array_values($ids); }
     }
     $stmt = $pdo->prepare("SELECT * FROM computers WHERE $where_sql ORDER BY id DESC");
     $stmt->execute($params);
@@ -178,33 +178,156 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
 
 // CSV Export
 
-// --- CSV Template Download ---
+// --- XLSX Template Download (with dropdown validation) ---
 if (isset($_GET['download_template']) && $_GET['download_template'] === 'csv') {
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="computers_template.csv"');
-    $output = fopen('php://output', 'w');
-    fputs($output, "\xEF\xBB\xBF");
-    fputcsv($output, [
-        'Building', 'Floor', 'Department', 'End User', 'MR/PAR', 'Control Number',
-        'System Unit', 'System Unit S/N', 'Monitor', 'Monitor S/N',
-        'Mouse', 'Mouse S/N', 'Keyboard', 'Keyboard S/N',
-        'Printer', 'Printer S/N', 'Scanner', 'Scanner S/N',
-        'AVR/UPS', 'AVR/UPS S/N', 'Processor', 'Memory', 'Storage',
-        'OS', 'OS Product Key', 'License', 'Microsoft Office', 'MS Office Email',
-        'IP Address', 'MAC Address', 'Endpoint Secure', 'Firewall',
-        'Checked By', 'Encoded By', 'Remarks'
-    ]);
-    fputcsv($output, [
-        'Capiz', '2F', 'Accounting', 'Juan Dela Cruz', 'PAR-001', 'JBL-ACCT-PC001',
-        'Dell OptiPlex 7090', 'SN12345678', 'Dell 24" LED', 'MON1234',
-        'Logitech Optical', 'MS1234', 'Logitech USB', 'KB1234',
-        'Canon PIXMA G3010', 'PRN1234', 'None', 'None',
-        'APC 650VA', 'UPS1234', 'Intel Core i5-11400', '16GB DDR4', '512GB NVMe SSD',
-        'Windows 11 Pro 64-bit', 'XXXXX-XXXXX-XXXXX-XXXXX', 'Yes', 'Microsoft Office 2021', 'acctg@hospital.gov.ph',
-        '192.168.1.50', '00-1A-2B-3C-4D-5E', 'Yes', 'Yes',
-        'Engr. Santos', 'Admin', 'Active workstation'
-    ]);
-    fclose($output);
+    $tpl_buildings = ['ACIS','Bayanihan','Bio Safety','Capiz','Dietary','Frontline','HOPSS','Isolation','Lingap Baga','Medicine','OB-Gyne/Pedia','OPD','Orthopaedics','Surgery','Trauma','Wellness'];
+    $tpl_floors    = ['GF','2F','3F','4F','5F','6F','7F'];
+    $tpl_yesno     = ['Y','N'];
+    $tpl_license   = ['Yes','No'];
+    $tpl_statuses  = ['Working','Maintenance','Transferred','Condemned'];
+
+    $tpl_headers = [
+        'Building','Floor','Department','End User','MR/PAR','Control Number',
+        'System Unit','System Unit S/N','Monitor','Monitor S/N',
+        'Mouse','Mouse S/N','Keyboard','Keyboard S/N',
+        'Printer','Printer S/N','Scanner','Scanner S/N',
+        'AVR/UPS','AVR/UPS S/N','Processor','Memory','Storage',
+        'OS','OS Product Key','License','Microsoft Office','MS Office Email',
+        'IP Address','MAC Address','Endpoint Secure','Firewall',
+        'Checked By','Encoded By','Remarks','Status'
+    ];
+    $tpl_sample = [
+        'Capiz','2F','Accounting','Juan Dela Cruz','PAR-001','JBL-ACCT-PC001',
+        'Dell OptiPlex 7090','SN12345678','Dell 24" LED','MON1234',
+        'Logitech Optical','MS1234','Logitech USB','KB1234',
+        'Canon PIXMA G3010','PRN1234','None','None',
+        'APC 650VA','UPS1234','Intel Core i5-11400','16GB DDR4','512GB NVMe SSD',
+        'Windows 11 Pro 64-bit','XXXXX-XXXXX-XXXXX-XXXXX','Yes','Microsoft Office 2021','acctg@hospital.gov.ph',
+        '192.168.1.50','00-1A-2B-3C-4D-5E','Y','Y',
+        'Engr. Santos','Admin','Active workstation','Working'
+    ];
+
+    // ── Build XLSX (OpenXML) in-memory ─────────────────────────────────────
+    $xmlEsc = fn($v) => htmlspecialchars((string)$v, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+    // Shared strings
+    $tpl_ss = [];
+    $tpl_ssi = function(string $s) use (&$tpl_ss): int {
+        $k = array_search($s, $tpl_ss, true);
+        if ($k === false) { $tpl_ss[] = $s; $k = count($tpl_ss)-1; }
+        return $k;
+    };
+
+    // Column letters A..AI (35 cols)
+    $tpl_cols = [];
+    for ($i = 0; $i < 36; $i++) { $tpl_cols[] = $i < 26 ? chr(65+$i) : 'A'.chr(65+$i-26); }
+
+    // Rows: header + sample
+    $tpl_rows = [];
+    $hr = []; foreach ($tpl_headers as $h) { $hr[] = ['t'=>'s','v'=>$tpl_ssi($h)]; } $tpl_rows[] = $hr;
+    $sr = []; foreach ($tpl_sample  as $s) { $sr[] = ['t'=>'s','v'=>$tpl_ssi($s)]; } $tpl_rows[] = $sr;
+
+    // Sheet XML
+    $tpl_sheetXml  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    $tpl_sheetXml .= '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+    $tpl_sheetXml .= '<sheetData>';
+    foreach ($tpl_rows as $ri => $row) {
+        $rIdx = $ri + 1;
+        $tpl_sheetXml .= "<row r=\"$rIdx\">";
+        foreach ($row as $ci => $cell) {
+            $ref = $tpl_cols[$ci] . $rIdx;
+            $tpl_sheetXml .= "<c r=\"$ref\" t=\"s\"><v>{$cell['v']}</v></c>";
+        }
+        $tpl_sheetXml .= '</row>';
+    }
+    $tpl_sheetXml .= '</sheetData>';
+
+    // Dropdown validations
+    $lastTplRow = 1001; // support up to 1000 data rows
+    $tpl_bFormula   = '"' . implode(',', $tpl_buildings) . '"';
+    $tpl_fFormula   = '"' . implode(',', $tpl_floors) . '"';
+    $tpl_ynFormula  = '"' . implode(',', $tpl_yesno) . '"';
+    $tpl_licFormula = '"' . implode(',', $tpl_license) . '"';
+
+    $tpl_statusFormula = '"' . implode(',', $tpl_statuses) . '"';
+    $tpl_sheetXml .= '<dataValidations count="5">';
+    // Col A = Building
+    $tpl_sheetXml .= '<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Building" error="Please select a building from the list." sqref="A2:A'.$lastTplRow.'">';
+    $tpl_sheetXml .= '<formula1>'.$xmlEsc($tpl_bFormula).'</formula1></dataValidation>';
+    // Col B = Floor
+    $tpl_sheetXml .= '<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Floor" error="Please select a floor from the list." sqref="B2:B'.$lastTplRow.'">';
+    $tpl_sheetXml .= '<formula1>'.$xmlEsc($tpl_fFormula).'</formula1></dataValidation>';
+    // Col AE = Endpoint Secure (col index 30 → AE)
+    $tpl_sheetXml .= '<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Value" error="Enter Y or N." sqref="AE2:AE'.$lastTplRow.'">';
+    $tpl_sheetXml .= '<formula1>'.$xmlEsc($tpl_ynFormula).'</formula1></dataValidation>';
+    // Col AF = Firewall (col index 31 → AF)
+    $tpl_sheetXml .= '<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Value" error="Enter Y or N." sqref="AF2:AF'.$lastTplRow.'">';
+    $tpl_sheetXml .= '<formula1>'.$xmlEsc($tpl_ynFormula).'</formula1></dataValidation>';
+    // Col AJ = Status (col index 35 → AJ)
+    $tpl_sheetXml .= '<dataValidation type="list" allowBlank="1" showDropDown="0" showErrorMessage="1" errorTitle="Invalid Status" error="Please select a valid status." sqref="AJ2:AJ'.$lastTplRow.'">';
+    $tpl_sheetXml .= '<formula1>'.$xmlEsc($tpl_statusFormula).'</formula1></dataValidation>';
+    $tpl_sheetXml .= '</dataValidations>';
+    $tpl_sheetXml .= '</worksheet>';
+
+    // Shared strings XML
+    $tpl_ssXml  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    $tpl_ssXml .= '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'.count($tpl_ss).'" uniqueCount="'.count($tpl_ss).'">';
+    foreach ($tpl_ss as $s) { $tpl_ssXml .= '<si><t xml:space="preserve">'.$xmlEsc($s).'</t></si>'; }
+    $tpl_ssXml .= '</sst>';
+
+    // Styles XML (bold header row via cellXfs index 1)
+    $tpl_stylesXml  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    $tpl_stylesXml .= '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    $tpl_stylesXml .= '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>';
+    $tpl_stylesXml .= '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>';
+    $tpl_stylesXml .= '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>';
+    $tpl_stylesXml .= '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>';
+    $tpl_stylesXml .= '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/></cellXfs>';
+    $tpl_stylesXml .= '</styleSheet>';
+
+    $tpl_workbookXml  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    $tpl_workbookXml .= '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+    $tpl_workbookXml .= '<sheets><sheet name="Computers Template" sheetId="1" r:id="rId1"/></sheets></workbook>';
+
+    $tpl_wbRels  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    $tpl_wbRels .= '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+    $tpl_wbRels .= '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>';
+    $tpl_wbRels .= '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>';
+    $tpl_wbRels .= '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>';
+    $tpl_wbRels .= '</Relationships>';
+
+    $tpl_rootRels  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    $tpl_rootRels .= '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+    $tpl_rootRels .= '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>';
+    $tpl_rootRels .= '</Relationships>';
+
+    $tpl_contentTypes  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    $tpl_contentTypes .= '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">';
+    $tpl_contentTypes .= '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>';
+    $tpl_contentTypes .= '<Default Extension="xml" ContentType="application/xml"/>';
+    $tpl_contentTypes .= '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
+    $tpl_contentTypes .= '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+    $tpl_contentTypes .= '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>';
+    $tpl_contentTypes .= '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
+    $tpl_contentTypes .= '</Types>';
+
+    $tpl_tmpFile = tempnam(sys_get_temp_dir(), 'computers_tpl_') . '.xlsx';
+    $tpl_zip = new ZipArchive();
+    $tpl_zip->open($tpl_tmpFile, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+    $tpl_zip->addFromString('[Content_Types].xml',        $tpl_contentTypes);
+    $tpl_zip->addFromString('_rels/.rels',                $tpl_rootRels);
+    $tpl_zip->addFromString('xl/workbook.xml',            $tpl_workbookXml);
+    $tpl_zip->addFromString('xl/_rels/workbook.xml.rels', $tpl_wbRels);
+    $tpl_zip->addFromString('xl/worksheets/sheet1.xml',   $tpl_sheetXml);
+    $tpl_zip->addFromString('xl/sharedStrings.xml',       $tpl_ssXml);
+    $tpl_zip->addFromString('xl/styles.xml',              $tpl_stylesXml);
+    $tpl_zip->close();
+
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="computers_import_template.xlsx"');
+    header('Content-Length: ' . filesize($tpl_tmpFile));
+    readfile($tpl_tmpFile);
+    unlink($tpl_tmpFile);
     exit;
 }
 
@@ -256,13 +379,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $floors    = ['GF','2F','3F','4F','5F','6F','7F'];
 
     // Check for specific IDs to export (selective export from checkboxes)
-    $where_sql = '1=1';
+    $where_sql = 'deleted_at IS NULL';
     $params    = [];
     if (isset($_GET['ids']) && !empty($_GET['ids'])) {
         $ids = array_filter(explode(',', $_GET['ids']), 'is_numeric');
         if (!empty($ids)) {
             $placeholders = implode(',', array_fill(0, count($ids), '?'));
-            $where_sql    = "id IN ($placeholders)";
+            $where_sql    = "deleted_at IS NULL AND id IN ($placeholders)";
             $params       = array_values($ids);
         }
     }
@@ -344,29 +467,161 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// CSV Import
+// ── AJAX: Get last control number for a given prefix ─────────────────────────
+if (isset($_GET['action']) && $_GET['action'] === 'last_control_number') {
+    header('Content-Type: application/json');
+    $raw_input = trim($_GET['prefix'] ?? '');
+    if (empty($raw_input)) { echo json_encode(['error' => 'No prefix']); exit; }
+
+    // Extract the true prefix by stripping any trailing digits from the input.
+    // e.g. "JBL-PHAR-PC025" → prefix "JBL-PHAR-PC", or "JBL-IHOMS-PC-" stays as-is.
+    if (preg_match('/^(.*?)(\d+)$/', $raw_input, $m)) {
+        $prefix = $m[1];   // everything before the trailing digit run
+    } else {
+        $prefix = $raw_input; // no trailing digits, use as-is
+    }
+
+    if (empty($prefix)) { echo json_encode(['error' => 'Could not determine prefix']); exit; }
+
+    // Escape prefix for LIKE (PostgreSQL)
+    $like_prefix = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $prefix);
+    $stmt = $pdo->prepare("SELECT control_number FROM computers WHERE control_number ILIKE ? AND deleted_at IS NULL ORDER BY control_number DESC LIMIT 50");
+    $stmt->execute([$like_prefix . '%']);
+    $rows = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    if (empty($rows)) {
+        echo json_encode(['prefix' => $prefix, 'last' => null, 'next' => $prefix . '001']);
+        exit;
+    }
+
+    // Find the highest trailing numeric suffix across all matching control numbers.
+    // Works for any suffix format: pure digits (025), or letters+digits (PC025 → 025).
+    $max_num = 0;
+    $pad_len  = 3;
+    $last_cn  = null;
+    foreach ($rows as $cn) {
+        // Strip the prefix (case-insensitive) then grab the trailing digit run
+        $after_prefix = substr($cn, strlen($prefix));
+        if (preg_match('/(\d+)$/', $after_prefix, $dm)) {
+            $num = (int)$dm[1];
+            if ($num > $max_num) {
+                $max_num = $num;
+                $pad_len = strlen($dm[1]);   // preserve zero-padding width
+                $last_cn = $cn;
+            }
+        }
+    }
+
+    if ($max_num === 0) {
+        // Matched by prefix but no trailing number found — suggest 001
+        echo json_encode(['prefix' => $prefix, 'last' => $rows[0] ?? null, 'next' => $prefix . '001']);
+        exit;
+    }
+
+    $next_num = str_pad((string)($max_num + 1), $pad_len, '0', STR_PAD_LEFT);
+    // Build next by replacing only the trailing digit group in the last control number
+    $next_cn = preg_replace('/\d+$/', $next_num, $last_cn);
+
+    echo json_encode(['prefix' => $prefix, 'last' => $last_cn, 'next' => $next_cn]);
+    exit;
+}
+
+// ── Helper: read rows from an XLSX file (no external library needed) ──────────
+function readXlsxRows(string $filePath): ?array {
+    if (!class_exists('ZipArchive')) return null;
+    $zip = new ZipArchive();
+    if ($zip->open($filePath) !== true) return null;
+
+    // Read shared strings
+    $sharedStrings = [];
+    $ssXml = $zip->getFromName('xl/sharedStrings.xml');
+    if ($ssXml !== false) {
+        $ssDom = new SimpleXMLElement($ssXml);
+        foreach ($ssDom->si as $si) {
+            // Concatenate all <t> children (handles rich text)
+            $text = '';
+            foreach ($si->xpath('.//t') as $t) { $text .= (string)$t; }
+            $sharedStrings[] = $text;
+        }
+    }
+
+    // Read sheet XML
+    $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+    $zip->close();
+    if ($sheetXml === false) return null;
+
+    $dom = new SimpleXMLElement($sheetXml);
+    $dom->registerXPathNamespace('x', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main');
+
+    $rows = [];
+    foreach ($dom->xpath('//x:row') as $xmlRow) {
+        $rowArr = [];
+        $prevColIdx = -1;
+        foreach ($xmlRow->xpath('x:c') as $cell) {
+            // Parse column reference (e.g. "A", "B", "AA")
+            $ref  = strtoupper((string)$cell['r']);
+            preg_match('/^([A-Z]+)/', $ref, $m);
+            $colStr = $m[1] ?? 'A';
+            $colIdx = 0;
+            foreach (str_split($colStr) as $ch) { $colIdx = $colIdx * 26 + (ord($ch) - 64); }
+            $colIdx--; // 0-based
+
+            // Fill gaps with empty strings
+            for ($g = $prevColIdx + 1; $g < $colIdx; $g++) { $rowArr[] = ''; }
+            $prevColIdx = $colIdx;
+
+            $t = (string)($cell['t'] ?? '');
+            $v = (string)($cell->v ?? '');
+            if ($t === 's') {
+                $rowArr[] = $sharedStrings[(int)$v] ?? '';
+            } elseif ($t === 'inlineStr') {
+                $rowArr[] = (string)($cell->is->t ?? '');
+            } else {
+                $rowArr[] = $v;
+            }
+        }
+        $rows[] = $rowArr;
+    }
+    return $rows;
+}
+
+// CSV / XLSX Import
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
     // Re-verify specifically for file upload
     if (!isset($_POST['csrf_token']) || !verifyCsrfToken($_POST['csrf_token'])) {
         $error_msg = "Security validation failed. Please refresh the page and try again.";
     } else {
+        $uploaded_name = strtolower($_FILES['csv_file']['name'] ?? '');
         $file = $_FILES['csv_file']['tmp_name'];
-        if (($handle = fopen($file, 'r')) !== false) {
-            $imported   = 0;
-            $updated    = 0;
-            $skipped    = 0;
-            $duplicates = 0;
-            $errors     = [];
+        $is_xlsx = str_ends_with($uploaded_name, '.xlsx') || str_ends_with($uploaded_name, '.xls');
 
-            // Read header to auto-detect format
-            $header = fgetcsv($handle);
-            $header = array_map('trim', $header ?? []);
+        $imported   = 0;
+        $updated    = 0;
+        $skipped    = 0;
+        $errors     = [];
 
-            // New format: starts with Building, Floor, Department (34 cols)
-            // Old format: starts with Location (32 cols)
+        // ── Build rows array (CSV or XLSX) ───────────────────────────────────
+        $all_rows = null;
+        if ($is_xlsx) {
+            $all_rows = readXlsxRows($file);
+            if ($all_rows === null) {
+                $error_msg = "Could not read the .xlsx file. Please ensure it is a valid Excel file.";
+            }
+        } else {
+            // Plain CSV
+            $all_rows = [];
+            if (($handle = fopen($file, 'r')) !== false) {
+                while (($r = fgetcsv($handle)) !== false) { $all_rows[] = $r; }
+                fclose($handle);
+            }
+        }
+
+        if ($all_rows !== null && empty($error_msg)) {
+            // First row = header
+            $header = array_map('trim', $all_rows[0] ?? []);
             $is_new_format = (isset($header[0]) && strtolower($header[0]) === 'building');
 
-            while (($row = fgetcsv($handle)) !== false) {
+            foreach (array_slice($all_rows, 1) as $row) {
                 $row = array_map(function($val) {
                     $val = trim((string)$val);
                     if (!mb_check_encoding($val, 'UTF-8')) {
@@ -489,9 +744,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
                         $imported++;
                     }
 
-                    // ── Sync firewall_status from CSV firewall column (index 29) ──
+                    // ── Sync firewall_status from import firewall column (index 29) ──
                     $fw_csv_val = $data[29] ?? 'N'; // firewall column
-                    $fw_csv_status = ($fw_csv_val === 'Y') ? 'Yes' : 'No';
+                    $fw_csv_status = (strtoupper($fw_csv_val) === 'Y' || strtolower($fw_csv_val) === 'yes') ? 'Yes' : 'No';
                     $fw_csv_ctrl = $control_number;
                     if (!empty($fw_csv_ctrl)) {
                         $fw_csv_sync = $pdo->prepare("
@@ -516,19 +771,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
                         $errors[] = "Row near ctrl#" . htmlspecialchars($control_number) . ": " . $e->getMessage();
                     }
                 }
-
             }
-            fclose($handle);
 
+            $file_type  = $is_xlsx ? 'XLSX' : 'CSV';
             $fmt_label  = $is_new_format ? 'new (Building/Floor/Dept)' : 'old (Location)';
-            $msg_parts  = ["Imported $imported new computers [$fmt_label format]"];
+            $msg_parts  = ["Imported $imported new computers [$file_type · $fmt_label format]"];
             if ($updated > 0) $msg_parts[] = "$updated computers updated";
             if ($skipped > 0) $msg_parts[] = "$skipped failed";
             $success_msg = implode(', ', $msg_parts) . '.';
             if (!empty($errors)) {
                 $error_msg = "Sample errors: " . implode(' | ', $errors);
             }
-            $audit_msg = "Imported $imported new computers";
+            $audit_msg = "Imported $imported new computers via $file_type";
             if ($updated > 0) $audit_msg .= " and updated $updated existing computers";
             logAudit($pdo, 'import_csv', $audit_msg, 'computer');
         }
@@ -537,18 +791,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['csv_file'])) {
 
 // Add Computer
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_computer') {
-    $control_number = $_POST['control_number'] ?? '';
+    $control_number = trim($_POST['control_number'] ?? '');
     $encoded_by = trim($_POST['encoded_by'] ?? '');
     $checked_by = trim($_POST['checked_by'] ?? '');
+    $confirmed_by_supervisor = trim($_POST['confirmed_by_supervisor'] ?? '');
+    $supervisor_approved = !empty($_POST['supervisor_approved']) && $_POST['supervisor_approved'] == '1';
 
-    if (empty($encoded_by) || empty($checked_by)) {
+    if (empty($control_number)) {
+        $error_msg = "Error: 'Control Number' is a required field.";
+    } elseif (empty($_POST['endpoint_secure']) || empty($_POST['firewall'])) {
+        $error_msg = "Error: 'Endpoint Secure' and 'Firewall' are required fields — please select Yes or No.";
+    } elseif (empty($confirmed_by_supervisor) || !$supervisor_approved) {
+        $error_msg = "Error: Supervisor confirmation is required. Please select a supervisor and tick the confirmation checkbox.";
+    } elseif (empty($encoded_by) || empty($checked_by)) {
         $error_msg = "Error: 'Encoded By' and 'Checked By' are required fields.";
     } else {
         // Check Duplicates
         $dups = [];
 
-        // Control Number
-        $check = $pdo->prepare("SELECT end_user FROM computers WHERE control_number = ? LIMIT 1");
+        // Control Number (exclude soft-deleted records)
+        $check = $pdo->prepare("SELECT end_user FROM computers WHERE control_number = ? AND deleted_at IS NULL LIMIT 1");
         $check->execute([$control_number]);
         $existing = $check->fetch(PDO::FETCH_ASSOC);
         if ($existing) {
@@ -560,7 +822,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         // Special IP values that are allowed to appear on multiple records
         $ip_exempt = ['dhcp', 'obtain', 'wifi', 'n/a'];
         if (!empty($ip) && !in_array(strtolower(trim($ip)), $ip_exempt)) {
-            $check = $pdo->prepare("SELECT end_user, control_number FROM computers WHERE ip_address = ? LIMIT 1");
+            $check = $pdo->prepare("SELECT end_user, control_number FROM computers WHERE ip_address = ? AND deleted_at IS NULL LIMIT 1");
             $check->execute([$ip]);
             $existing = $check->fetch(PDO::FETCH_ASSOC);
             if ($existing) {
@@ -573,7 +835,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $mac = strtoupper(str_replace(':', '-', trim($_POST['mac_address'] ?? '')));
         $_POST['mac_address'] = $mac;
         if (!empty($mac)) {
-            $check = $pdo->prepare("SELECT end_user, control_number FROM computers WHERE mac_address = ? LIMIT 1");
+            $check = $pdo->prepare("SELECT end_user, control_number FROM computers WHERE mac_address = ? AND deleted_at IS NULL LIMIT 1");
             $check->execute([$mac]);
             $existing = $check->fetch(PDO::FETCH_ASSOC);
             if ($existing) {
@@ -597,7 +859,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $location_val = trim("$building_val $floor_val $dept_text");
                 $new_status = $_POST['status'] ?? 'Working';
                 $new_transferred_to = ($new_status === 'Transferred') ? ($_POST['transferred_to'] ?? null) : null;
-                $stmt = $pdo->prepare("INSERT INTO computers (department, end_user, mr_par, status, transferred_to, control_number, system_unit, system_unit_sn, monitor, monitor_sn, mouse, mouse_sn, keyboard, keyboard_sn, printer, printer_sn, scanner, scanner_sn, avr_ups, avr_ups_sn, processor, memory, storage, os, os_product_key, license, microsoft_office, ms_office_email, ip_address, mac_address, endpoint_secure, firewall, checked_by, encoded_by, remarks, remarks_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                // ── Insert into pending_computers for supervisor approval ──
+                $stmt = $pdo->prepare("INSERT INTO pending_computers (
+                    department, end_user, mr_par, status, transferred_to, control_number,
+                    system_unit, system_unit_sn, monitor, monitor_sn, mouse, mouse_sn,
+                    keyboard, keyboard_sn, printer, printer_sn, scanner, scanner_sn,
+                    avr_ups, avr_ups_sn, processor, memory, storage, os, os_product_key,
+                    license, microsoft_office, ms_office_email, ip_address, mac_address,
+                    endpoint_secure, firewall, checked_by, encoded_by, remarks, remarks_date,
+                    submitted_by_user_id, submitted_by_name, confirmed_by_supervisor, approval_status
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
                 $stmt->execute([
                     $location_val,
                     $_POST['end_user'],
@@ -628,151 +899,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     $_POST['microsoft_office'],
                     $_POST['ms_office_email'] ?? '',
                     $_POST['ip_address'],
-                    $_POST['mac_address'],
-                    $_POST['endpoint_secure'] ?? 'N',
-                    $_POST['firewall'] ?? 'N',
+                    $mac,
+                    $_POST['endpoint_secure'],
+                    $_POST['firewall'],
                     $_POST['checked_by'],
                     $_POST['encoded_by'],
                     $_POST['remarks'],
                     !empty($_POST['remarks_date']) ? $_POST['remarks_date'] : null,
+                    $_SESSION['user_id'] ?? null,
+                    $_SESSION['full_name'] ?? ($_SESSION['username'] ?? ''),
+                    $confirmed_by_supervisor,
+                    'Pending',
                 ]);
-                $computer_id = $pdo->lastInsertId();
-
-                // ── If Transferred, copy record to target satellite table ───
-                if ($new_status === 'Transferred' && !empty($new_transferred_to)) {
-                    $table_map = [
-                        'JASMC-ST'    => 'computers_jasmc_st',
-                        'JASMC-VT'    => 'computers_jasmc_vt',
-                        'DOH-JBL-CMC' => 'computers_doh_jbl_cmc',
-                    ];
-                    $target_table = $table_map[$new_transferred_to] ?? null;
-                    if ($target_table) {
-                        try {
-                            $ins_transfer = $pdo->prepare("INSERT INTO $target_table
-                                (department, end_user, mr_par, status, transferred_to, control_number, system_unit, system_unit_sn,
-                                 monitor, monitor_sn, mouse, mouse_sn, keyboard, keyboard_sn, printer, printer_sn,
-                                 scanner, scanner_sn, avr_ups, avr_ups_sn, processor, memory, storage, os, os_product_key,
-                                 license, microsoft_office, ms_office_email, ip_address, mac_address, endpoint_secure,
-                                 firewall, checked_by, encoded_by, remarks, remarks_date, source_computer_id, transferred_at)
-                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())
-                                ON CONFLICT (control_number) DO UPDATE SET
-                                    department=EXCLUDED.department, end_user=EXCLUDED.end_user, mr_par=EXCLUDED.mr_par,
-                                    status=EXCLUDED.status, transferred_to=EXCLUDED.transferred_to,
-                                    system_unit=EXCLUDED.system_unit, system_unit_sn=EXCLUDED.system_unit_sn,
-                                    monitor=EXCLUDED.monitor, monitor_sn=EXCLUDED.monitor_sn,
-                                    mouse=EXCLUDED.mouse, mouse_sn=EXCLUDED.mouse_sn,
-                                    keyboard=EXCLUDED.keyboard, keyboard_sn=EXCLUDED.keyboard_sn,
-                                    printer=EXCLUDED.printer, printer_sn=EXCLUDED.printer_sn,
-                                    scanner=EXCLUDED.scanner, scanner_sn=EXCLUDED.scanner_sn,
-                                    avr_ups=EXCLUDED.avr_ups, avr_ups_sn=EXCLUDED.avr_ups_sn,
-                                    processor=EXCLUDED.processor, memory=EXCLUDED.memory, storage=EXCLUDED.storage,
-                                    os=EXCLUDED.os, os_product_key=EXCLUDED.os_product_key,
-                                    license=EXCLUDED.license, microsoft_office=EXCLUDED.microsoft_office,
-                                    ms_office_email=EXCLUDED.ms_office_email, ip_address=EXCLUDED.ip_address,
-                                    mac_address=EXCLUDED.mac_address, endpoint_secure=EXCLUDED.endpoint_secure,
-                                    firewall=EXCLUDED.firewall, checked_by=EXCLUDED.checked_by,
-                                    encoded_by=EXCLUDED.encoded_by, remarks=EXCLUDED.remarks,
-                                    remarks_date=EXCLUDED.remarks_date, source_computer_id=EXCLUDED.source_computer_id,
-                                    transferred_at=NOW()
-                            ");
-                            $ins_transfer->execute([
-                                $location_val, $_POST['end_user'], $_POST['mr_par'],
-                                'Working', null, $_POST['control_number'],
-                                $_POST['system_unit'], $_POST['system_unit_sn'],
-                                $_POST['monitor'], $_POST['monitor_sn'],
-                                $_POST['mouse'], $_POST['mouse_sn'],
-                                $_POST['keyboard'], $_POST['keyboard_sn'],
-                                $printer_val, $_POST['printer_sn'],
-                                $scanner_val, $_POST['scanner_sn'],
-                                $avr_ups_val, $_POST['avr_ups_sn'],
-                                $_POST['processor'], $_POST['memory'], $_POST['storage'],
-                                $_POST['os'], $_POST['os_product_key'],
-                                $_POST['license'], $_POST['microsoft_office'],
-                                $_POST['ms_office_email'] ?? '', $_POST['ip_address'],
-                                $_POST['mac_address'], $_POST['endpoint_secure'] ?? 'N',
-                                $_POST['firewall'] ?? 'N', $_POST['checked_by'],
-                                $_POST['encoded_by'], $_POST['remarks'],
-                                !empty($_POST['remarks_date']) ? $_POST['remarks_date'] : null,
-                                $computer_id
-                            ]);
-                            logAudit($pdo, 'transfer_computer', "Transferred Computer Control #: {$_POST['control_number']} to $new_transferred_to", 'computer', $computer_id);
-                        } catch (Exception $tr_e) {
-                            error_log("Transfer (add) to $new_transferred_to failed: " . $tr_e->getMessage());
-                        }
-                    }
-                }
-                $dept = $location_val;
-                $end_user = $_POST['end_user'];
                 $ctrl_num = $_POST['control_number'];
-                $sys_ip = $_POST['ip_address'];
-                $sys_mac = $_POST['mac_address'];
-                $sys_unit = $_POST['system_unit'];
-                $add_comp_detail = "Added Computer | Control #: $ctrl_num | User: $end_user | Location: $dept | System Unit: $sys_unit | IP: $sys_ip | MAC: $sys_mac | OS: {$_POST['os']} | Processor: {$_POST['processor']} | Memory: {$_POST['memory']} | Storage: {$_POST['storage']}";
-
-                // ── Sync firewall_status when firewall=Y on add ──────────────
-                $fw_val_add = $_POST['firewall'] ?? 'N';
-                try {
-                    $fw_sync = $pdo->prepare("
-                        INSERT INTO firewall_status (control_number, status, last_edited_by, updated_at)
-                        VALUES (?, ?, ?, NOW())
-                        ON CONFLICT (control_number) DO UPDATE
-                            SET status = EXCLUDED.status,
-                                last_edited_by = EXCLUDED.last_edited_by,
-                                updated_at = NOW()
-                    ");
-                    $fw_status_val = ($fw_val_add === 'Y') ? 'Yes' : 'No';
-                    $fw_sync->execute([$ctrl_num, $fw_status_val, $_SESSION['username'] ?? '']);
-                } catch (Exception $fw_e) {
-                    error_log("Firewall status sync (add) failed: " . $fw_e->getMessage());
-                }
-                if (!empty($_POST['remarks']))
-                    $add_comp_detail .= " | Remarks: {$_POST['remarks']}";
-                logAudit($pdo, 'add_computer', $add_comp_detail, 'computer', $computer_id);
-                /* logChangelog($pdo, 'feature', 'Computer Inventory', "Added Computer: $ctrl_num ($end_user)", "Department: $dept | System Unit: $sys_unit | IP: $sys_ip"); removed */
-                $success_msg = "Computer added successfully.";
-
-                // Sync MS Office version + email to Office Licenses
-                $ms_office_email   = $_POST['ms_office_email'] ?? '';
-                $ms_office_version = $_POST['microsoft_office'] ?? '';
-                if (!empty($_POST['control_number'])) {
-                    try {
-                        $sync_stmt = $pdo->prepare("UPDATE office_licenses SET email = ?, ms_office_version = ? WHERE control_number = ?");
-                        $sync_stmt->execute([$ms_office_email, $ms_office_version, $_POST['control_number']]);
-                        $synced = $sync_stmt->rowCount();
-                        if ($synced > 0) {
-                            logAudit($pdo, 'sync_office', "Synced MS Office version + email to $synced license(s) for " . $_POST['control_number'], 'sync');
-                        }
-                    } catch (Exception $sync_e) {
-                        error_log("Office sync to licenses failed: " . $sync_e->getMessage());
-                    }
-                }
-
-                // Auto-create Office License if specified
-                $ms_office = $_POST['microsoft_office'] ?? '';
-                if (!empty($ms_office)) {
-                    try {
-                        $stmt_office = $pdo->prepare("INSERT INTO office_licenses (control_number, department, ms_office_version, product_key, email, remarks) VALUES (?, ?, ?, ?, ?, ?)");
-                        $stmt_office->execute([
-                            $_POST['control_number'],
-                            $location_val,
-                            $ms_office,
-                            '', // Office Product Key (Manual Entry required)
-                            $ms_office_email, // Include email if provided
-                            "Auto-generated from Computer Inventory (ID: $computer_id)"
-                        ]);
-                        // Optional: Log this auto-creation
-                        // logAudit($pdo, 'add_license', "Auto-created license for " . $_POST['control_number'], 'office', $pdo->lastInsertId());
-                    } catch (Exception $e) {
-                        // Fail silently for office sync to avoid blocking computer add, or append to warning
-                        // $error_msg .= " (Office sync failed: " . $e->getMessage() . ")";
-                    }
-                }
-
-                // Sync newly added computer to Asset Inventory
-                syncComputerToAsset($pdo, $computer_id);
-
-                // Automatically update IP Address module (ips table) and set status active
-                syncComputerIpToIpModule($pdo, $_POST['ip_address'] ?? '', $_POST['mac_address'] ?? '', $_POST['control_number'] ?? '', $location_val, $dept_text);
+                $end_user = $_POST['end_user'];
+                logAudit($pdo, 'submit_computer', "Submitted Computer for Approval | Control #: $ctrl_num | User: $end_user | Confirmed by Supervisor: $confirmed_by_supervisor", 'computer');
+                $success_msg = "✅ Computer submitted for supervisor approval! It will appear in the main inventory once approved.";
             } catch (Exception $e) {
                 $error_msg = "Error adding computer: " . $e->getMessage();
             }
@@ -792,12 +934,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
     if (empty($encoded_by) || empty($checked_by)) {
         $error_msg = "Error: 'Encoded By' and 'Checked By' are required fields.";
+    } elseif (empty($_POST['endpoint_secure']) || empty($_POST['firewall'])) {
+        $error_msg = "Error: 'Endpoint Secure' and 'Firewall' are required fields — please select Yes or No.";
     } else {
         // Check Duplicates
         $dups = [];
 
         // Control Number
-        $check = $pdo->prepare("SELECT end_user FROM computers WHERE control_number = ? AND id != ? LIMIT 1");
+        $check = $pdo->prepare("SELECT end_user FROM computers WHERE control_number = ? AND id != ? AND deleted_at IS NULL LIMIT 1");
         $check->execute([$control_number, $id]);
         $existing = $check->fetch(PDO::FETCH_ASSOC);
         if ($existing) {
@@ -808,7 +952,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         // Special IP values that are allowed to appear on multiple records
         $ip_exempt = ['dhcp', 'obtain', 'wifi', 'n/a'];
         if (!empty($ip) && !in_array(strtolower(trim($ip)), $ip_exempt)) {
-            $check = $pdo->prepare("SELECT end_user, control_number FROM computers WHERE ip_address = ? AND id != ? LIMIT 1");
+            $check = $pdo->prepare("SELECT end_user, control_number FROM computers WHERE ip_address = ? AND id != ? AND deleted_at IS NULL LIMIT 1");
             $check->execute([$ip, $id]);
             $existing = $check->fetch(PDO::FETCH_ASSOC);
             if ($existing) {
@@ -819,19 +963,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
         // MAC Address
         if (!empty($mac)) {
-            $check = $pdo->prepare("SELECT end_user, control_number FROM computers WHERE mac_address = ? AND id != ? LIMIT 1");
+            $check = $pdo->prepare("SELECT end_user, control_number FROM computers WHERE mac_address = ? AND id != ? AND deleted_at IS NULL LIMIT 1");
             $check->execute([$mac, $id]);
             $existing = $check->fetch(PDO::FETCH_ASSOC);
             if ($existing) {
                 $ctx = $existing['end_user'] . " (Control #: " . $existing['control_number'] . ")";
                 $dups[] = "MAC Address '$mac' (assigned to $ctx)";
             }
-        }
-        if (!empty($mac)) {
-            $check = $pdo->prepare("SELECT COUNT(*) FROM computers WHERE mac_address = ? AND id != ?");
-            $check->execute([$mac, $id]);
-            if ($check->fetchColumn() > 0)
-                $dups[] = "MAC Address '$mac'";
         }
 
         if (!empty($dups)) {
@@ -1119,27 +1257,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// Delete Computer
+// Delete Computer (soft-delete — moves to Trash, restorable)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_computer') {
     try {
-        $id = $_POST['id'];
-        $snap = $pdo->prepare("SELECT * FROM computers WHERE id = ?");
+        $id = (int)$_POST['id'];
+        $snap = $pdo->prepare("SELECT * FROM computers WHERE id = ? AND deleted_at IS NULL");
         $snap->execute([$id]);
         $del_c = $snap->fetch(PDO::FETCH_ASSOC);
-        $del_comp_detail = "Deleted Computer ID $id";
-        if ($del_c) {
-            $del_comp_detail = "Deleted Computer | ID: $id | Control #: {$del_c['control_number']} | User: {$del_c['end_user']} | Dept: {$del_c['department']} | System Unit: {$del_c['system_unit']} | IP: {$del_c['ip_address']} | MAC: {$del_c['mac_address']} | OS: {$del_c['os']}";
-            if ($del_c['remarks'])
-                $del_comp_detail .= " | Remarks: {$del_c['remarks']}";
+        if (!$del_c) {
+            $error_msg = "Computer not found or already deleted.";
+        } else {
+            $deleted_by_name = $_SESSION['full_name'] ?? ($_SESSION['username'] ?? 'unknown');
+            // Soft-delete: set deleted_at / deleted_by instead of removing the row
+            $pdo->prepare("UPDATE computers SET deleted_at = NOW(), deleted_by = ? WHERE id = ?")
+                ->execute([$deleted_by_name, $id]);
+            // Release IP in IP module
+            if (!empty($del_c['ip_address'])) {
+                releaseComputerIpInIpModule($pdo, $del_c['ip_address'], $del_c['control_number'] ?? '');
+            }
+            // Write to trash_log
+            try {
+                $pdo->prepare("INSERT INTO trash_log (table_name, record_id, action, done_by, snapshot) VALUES ('computers',?,?,?,?::jsonb)")
+                    ->execute([$id, 'trashed', $deleted_by_name, json_encode($del_c)]);
+            } catch (Exception $tl_e) { /* non-fatal */ }
+            $del_comp_detail = "Trashed Computer | ID: $id | Control #: {$del_c['control_number']} | User: {$del_c['end_user']} | Dept: {$del_c['department']} | System Unit: {$del_c['system_unit']} | IP: {$del_c['ip_address']} | MAC: {$del_c['mac_address']} | OS: {$del_c['os']}";
+            if ($del_c['remarks']) $del_comp_detail .= " | Remarks: {$del_c['remarks']}";
+            logAudit($pdo, 'delete_computer', $del_comp_detail, 'computer', $id);
+            $success_msg = "Computer moved to Trash. <a href='" . BASE_URL . "/modules/trash/' class='underline font-bold'>View Trash →</a>";
         }
-        $stmt = $pdo->prepare("DELETE FROM computers WHERE id = ?");
-        $stmt->execute([$id]);
-        if ($del_c && !empty($del_c['ip_address'])) {
-            releaseComputerIpInIpModule($pdo, $del_c['ip_address'], $del_c['control_number'] ?? '');
-        }
-        logAudit($pdo, 'delete_computer', $del_comp_detail, 'computer', $id);
-        /* if ($del_c) logChangelog($pdo, 'bugfix', 'Computer Inventory', "Removed Computer: ...", ...); removed — data changes not tracked in changelog */
-        $success_msg = "Computer deleted successfully.";
     } catch (Exception $e) {
         $error_msg = "Error deleting computer: " . $e->getMessage();
     }
@@ -1164,7 +1309,7 @@ $ms_office_filter = $_GET['ms_office'] ?? 'All';
 $checked_by_filter = $_GET['checked_by'] ?? 'All';
 $sort_by = $_GET['sort'] ?? 'id_desc';
 
-$where_clauses = ["1=1"];
+$where_clauses = ["deleted_at IS NULL"];
 $params = [];
 
 if ($search_term) {
@@ -1266,6 +1411,12 @@ switch ($sort_by) {
     case 'dept_desc':
         $order_by = "department DESC";
         break;
+    case 'ctrl_asc':
+        $order_by = "control_number ASC";
+        break;
+    case 'ctrl_desc':
+        $order_by = "control_number DESC";
+        break;
     case 'id_desc':
     default:
         $order_by = "id DESC";
@@ -1336,6 +1487,14 @@ $checked_by_values = $pdo->query("SELECT DISTINCT checked_by FROM computers WHER
 $staff_users = $pdo->query("
     SELECT full_name FROM users
     WHERE username NOT IN ('Editor_Test', 'Viewer_Test', 'admin')
+      AND full_name IS NOT NULL AND TRIM(full_name) != ''
+    ORDER BY full_name
+")->fetchAll(PDO::FETCH_COLUMN);
+
+// Get admin-role users only for the Supervisor Confirmation dropdown
+$supervisor_users = $pdo->query("
+    SELECT full_name FROM users
+    WHERE role = 'admin'
       AND full_name IS NOT NULL AND TRIM(full_name) != ''
     ORDER BY full_name
 ")->fetchAll(PDO::FETCH_COLUMN);
@@ -1494,6 +1653,8 @@ if (!$is_ajax) {
                         <option value="user_desc" <?= $sort_by === 'user_desc' ? 'selected' : '' ?>>User (Z-A)</option>
                         <option value="dept_asc" <?= $sort_by === 'dept_asc' ? 'selected' : '' ?>>Location (A-Z)</option>
                         <option value="dept_desc" <?= $sort_by === 'dept_desc' ? 'selected' : '' ?>>Location (Z-A)</option>
+                        <option value="ctrl_asc" <?= $sort_by === 'ctrl_asc' ? 'selected' : '' ?>>Control No. (A-Z)</option>
+                        <option value="ctrl_desc" <?= $sort_by === 'ctrl_desc' ? 'selected' : '' ?>>Control No. (Z-A)</option>
                     </select>
                     <?php if ($total_pages > 1): ?>
                         <span class="text-xs text-slate-500">Page
@@ -1887,14 +2048,14 @@ if (!$is_ajax) {
     </div> <!-- End main container -->
 <?php endif; ?>
 
-<!-- Import CSV Modal -->
+<!-- Import CSV / XLSX Modal -->
 <div id="importModal" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog">
     <div class="flex items-center justify-center min-h-screen px-4">
         <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" onclick="toggleModal('importModal')"></div>
         <div class="relative bg-white dark:bg-[#1a2130] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-200 dark:border-[#232b3d]">
             <div class="flex items-center justify-between border-b border-slate-200 dark:border-[#232b3d] pb-3 mb-4">
                 <h3 class="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <span class="material-symbols-outlined text-amber-600">upload_file</span> Import Computers from CSV
+                    <span class="material-symbols-outlined text-amber-600">upload_file</span> Import Computers
                 </h3>
                 <button type="button" onclick="toggleModal('importModal')" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors">
                     <span class="material-symbols-outlined">close</span>
@@ -1905,8 +2066,8 @@ if (!$is_ajax) {
                 <?= getCsrfInput() ?>
 
                 <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select CSV File</label>
-                    <input type="file" name="csv_file" accept=".csv" required
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select File <span class="normal-case font-normal text-slate-400">(.xlsx or .csv)</span></label>
+                    <input type="file" name="csv_file" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required
                         class="w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-amber-500/10 file:text-amber-600 hover:file:bg-amber-500/20 file:cursor-pointer border border-slate-200 dark:border-[#232b3d] rounded-xl p-2 bg-slate-50 dark:bg-[#101622]">
                 </div>
 
@@ -1914,13 +2075,21 @@ if (!$is_ajax) {
                     <p class="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                         <span class="material-symbols-outlined text-[16px] text-amber-500">info</span> Supported Formats:
                     </p>
-                    <p>&bull; Standard Computer Inventory CSV format (35 columns) or legacy format.</p>
-                    <p>&bull; Existing computers matching Control Number will be updated automatically.</p>
-                    <p>&bull; IP &amp; MAC addresses will automatically register in the IP Module as Active.</p>
-                    <div class="pt-2">
-                        <a href="?download_template=csv" class="inline-flex items-center gap-1 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
-                            <span class="material-symbols-outlined text-[14px]">download</span> Download CSV Template
+                    <p>&bull; <span class="font-semibold text-slate-700 dark:text-slate-300">.xlsx</span> — Excel template with built-in dropdown lists <span class="text-emerald-500 font-bold">(recommended)</span></p>
+                    <p>&bull; <span class="font-semibold text-slate-700 dark:text-slate-300">.csv</span> — Standard 35-column format or legacy format.</p>
+                    <p>&bull; Existing records matching Control Number will be updated automatically.</p>
+                    <p>&bull; IP &amp; MAC addresses auto-register in the IP Module.</p>
+                    <div class="pt-2 border-t border-slate-200 dark:border-[#232b3d] mt-2 flex flex-col gap-1.5">
+                        <a href="?download_template=csv" class="inline-flex items-center gap-1.5 font-bold text-emerald-500 hover:text-emerald-400 hover:underline">
+                            <span class="material-symbols-outlined text-[15px]">download</span> Download Import Template (.xlsx)
                         </a>
+                        <div class="text-[10px] text-slate-400 dark:text-slate-500 pl-6 leading-5">
+                            <span class="inline-flex items-center gap-1"><span class="material-symbols-outlined text-[11px] text-amber-400">arrow_drop_down_circle</span> Col A: <strong>Building</strong> dropdown</span>&nbsp;&nbsp;
+                            <span class="inline-flex items-center gap-1"><span class="material-symbols-outlined text-[11px] text-amber-400">arrow_drop_down_circle</span> Col B: <strong>Floor</strong> dropdown</span><br>
+                            <span class="inline-flex items-center gap-1"><span class="material-symbols-outlined text-[11px] text-amber-400">arrow_drop_down_circle</span> Col AE: <strong>Endpoint Secure</strong> (Y/N)</span>&nbsp;&nbsp;
+                            <span class="inline-flex items-center gap-1"><span class="material-symbols-outlined text-[11px] text-amber-400">arrow_drop_down_circle</span> Col AF: <strong>Firewall</strong> (Y/N)</span><br>
+                            <span class="inline-flex items-center gap-1"><span class="material-symbols-outlined text-[11px] text-amber-400">arrow_drop_down_circle</span> Col AJ: <strong>Status</strong> (Working/Maintenance/Transferred/Condemned)</span>
+                        </div>
                     </div>
                 </div>
 
@@ -1984,8 +2153,38 @@ if (!$is_ajax) {
                             <input type="text" name="mr_par" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Control Number</label>
-                            <input type="text" name="control_number" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary">
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Control Number <span class="text-red-500">*</span></label>
+                            <!-- Prefix picker: selecting instantly auto-fills the next number -->
+                            <select id="ctrl_prefix_pick" onchange="onPrefixSelected(this.value)"
+                                class="w-full mb-1 bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-700 dark:text-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
+                                <option value="">— Pick a prefix (auto-fills next #) —</option>
+                                <?php foreach ([
+                                    'JBL-ACCT-PC','JBL-AHPS-PC','JBL-BAC-PC','JBL-BHO-PC','JBL-BILL-PC',
+                                    'JBL-BUDG-PC','JBL-CAO-PC','JBL-CAS-PC','JBL-CHEMO-PC','JBL-CMC-PC',
+                                    'JBL-COA-PC','JBL-COMPS-PC','JBL-CSR-PC','JBL-DCC-PC','JBL-DEN-PC',
+                                    'JBL-DOTS-PC','JBL-EHWC-PC','JBL-EMD-PC','JBL-ENGR-PC','JBL-FIN-PC',
+                                    'JBL-HEMS-PC','JBL-HIMS-PC','JBL-HKL-PC','JBL-HR-PC','JBL-ICC-PC',
+                                    'JBL-IHO-PC','JBL-ISO-PC','JBL-LAB-PC','JBL-MCC-PC','JBL-MHU-PC',
+                                    'JBL-MMU-PC','JBL-MPL-PC','JBL-MSW-PC','JBL-NDT-PC','JBL-OBM-PC',
+                                    'JBL-OPD-PC','JBL-OPHTHA-PC','JBL-ORTHO-PC','JBL-OS-HS-PC','JBL-OS-RAD-PC',
+                                    'JBL-OSM-PC','JBL-PACD-PC','JBL-PETRO-PC','JBL-PHAR-PC','JBL-PHU-PC',
+                                    'JBL-PLAN-PC','JBL-PMR-PC','JBL-PROC-PC','JBL-PWARD-PC','JBL-RAD-PC',
+                                    'JBL-RUM-PC','JBL-SURG-PC','JBL-TRAUMA-PC',
+                                ] as $pfx): ?>
+                                    <option value="<?= $pfx ?>"><?= $pfx ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="flex gap-1">
+                                <input type="text" name="control_number" id="add_control_number" required placeholder="e.g. JBL-IHO-PC036"
+                                    class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary uppercase"
+                                    oninput="this.value=this.value.toUpperCase()"
+                                    onblur="autoDetectOnBlur(this)">
+                                <button type="button" onclick="autoDetectControlNumber()" title="Auto-detect next control number"
+                                    class="flex-shrink-0 px-2 py-2 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 transition-colors">
+                                    <span class="material-symbols-outlined text-[16px]">auto_fix_high</span>
+                                </button>
+                            </div>
+                            <p id="ctrl_num_hint" class="text-[10px] text-slate-400 mt-0.5 hidden"></p>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
@@ -2106,8 +2305,8 @@ if (!$is_ajax) {
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">IP Address</label><input type="text" name="ip_address" placeholder="192.163.x.x" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MAC Address</label><input type="text" name="mac_address" placeholder="00-1A-2B-3C-4D-5E" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
-                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure</label><select name="endpoint_secure" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
-                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall</label><select name="firewall" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure <span class="text-red-500">*</span></label><select name="endpoint_secure" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="">-- Select Yes/No --</option><option value="Y">Yes</option><option value="N">No</option></select></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall <span class="text-red-500">*</span></label><select name="firewall" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="">-- Select Yes/No --</option><option value="Y">Yes</option><option value="N">No</option></select></div>
                     </div>
                 </div>
 
@@ -2132,9 +2331,40 @@ if (!$is_ajax) {
                     </div>
                 </div>
 
+                <!-- Supervisor Confirmation -->
+                <div class="border border-amber-400/40 bg-amber-50 dark:bg-amber-900/10 rounded-xl p-4">
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-amber-600 dark:text-amber-400 mb-3 flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-[15px]">verified_user</span>
+                        Supervisor Confirmation <span class="text-red-500">*</span>
+                    </p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Confirmed by Supervisor <span class="text-red-500">*</span></label>
+                            <select name="confirmed_by_supervisor" id="add_confirmed_by_supervisor" required
+                                class="w-full bg-white dark:bg-[#101622] border border-amber-300 dark:border-amber-700/50 text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400">
+                                <option value="">-- Select Supervisor --</option>
+                                <?php foreach ($supervisor_users as $u): ?>
+                                    <option value="<?= htmlspecialchars($u) ?>"><?= htmlspecialchars($u) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="flex items-end">
+                            <label class="flex items-start gap-2 cursor-pointer">
+                                <input type="checkbox" name="supervisor_approved" id="add_supervisor_approved" value="1" required
+                                    class="mt-1 h-4 w-4 rounded border-amber-400 text-amber-500 focus:ring-amber-400">
+                                <span class="text-xs text-slate-600 dark:text-slate-300">
+                                    I confirm that the supervisor has reviewed and approved the addition of this computer to the inventory. <span class="text-red-500">*</span>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-[#232b3d]">
                     <button type="button" onclick="toggleModal('addComputerModal')" class="px-5 py-2 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-[#232b3d]">Cancel</button>
-                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl hover:bg-primary/90">Save Computer</button>
+                    <button type="submit" class="px-6 py-2 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 flex items-center gap-1.5">
+                        <span class="material-symbols-outlined text-[16px]">save</span> Save Computer
+                    </button>
                 </div>
             </form>
         </div>
@@ -2181,7 +2411,7 @@ if (!$is_ajax) {
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Department / Section</label><input type="text" name="department" id="edit_department" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">End User</label><input type="text" name="end_user" id="edit_end_user" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MR / PAR #</label><input type="text" name="mr_par" id="edit_mr_par" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
-                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Control Number</label><input type="text" name="control_number" id="edit_control_number" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Control Number <span class="text-red-500">*</span></label><input type="text" name="control_number" id="edit_control_number" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
                         <div>
                             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Status</label>
                             <select name="status" id="edit_status" onchange="handleEditStatusChange(this.value)" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary">
@@ -2301,8 +2531,8 @@ if (!$is_ajax) {
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">IP Address</label><input type="text" name="ip_address" id="edit_ip_address" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
                         <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">MAC Address</label><input type="text" name="mac_address" id="edit_mac_address" placeholder="00-1A-2B-3C-4D-5E" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] rounded-xl px-3 py-2 text-sm font-mono text-slate-800 dark:text-white focus:ring-2 focus:ring-primary"></div>
-                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure</label><select name="endpoint_secure" id="edit_endpoint_secure" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
-                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall</label><select name="firewall" id="edit_firewall" class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="N">No</option><option value="Y">Yes</option></select></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Endpoint Secure <span class="text-red-500">*</span></label><select name="endpoint_secure" id="edit_endpoint_secure" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="">-- Select Yes/No --</option><option value="Y">Yes</option><option value="N">No</option></select></div>
+                        <div><label class="block text-xs font-bold text-slate-500 uppercase mb-1">Firewall <span class="text-red-500">*</span></label><select name="firewall" id="edit_firewall" required class="w-full bg-slate-50 dark:bg-[#101622] border border-slate-200 dark:border-[#232b3d] text-slate-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary"><option value="">-- Select Yes/No --</option><option value="Y">Yes</option><option value="N">No</option></select></div>
                     </div>
                 </div>
 
@@ -2338,6 +2568,80 @@ if (!$is_ajax) {
 
 <script>
 
+    // ── Auto-detect Control Number ───────────────────────────────────────────
+    // ── Shared: fetch next control number for a prefix ────────────────────────
+    function fetchNextControlNumber(prefix, callback) {
+        if (!prefix) return;
+        fetch('?action=last_control_number&prefix=' + encodeURIComponent(prefix))
+            .then(r => r.json())
+            .then(data => callback(data))
+            .catch(() => callback(null));
+    }
+
+    // ── Prefix dropdown → instantly auto-fills next number ────────────────────
+    function onPrefixSelected(prefix) {
+        const input = document.getElementById('add_control_number');
+        const hint  = document.getElementById('ctrl_num_hint');
+        if (!prefix) { input.value = ''; hint.classList.add('hidden'); return; }
+        hint.textContent = '⏳ Looking up last used…';
+        hint.classList.remove('hidden');
+        fetchNextControlNumber(prefix, data => {
+            if (!data || data.error) {
+                input.value = prefix + '001';
+                hint.textContent = 'No existing records for "' + prefix + '". Suggested: ' + prefix + '001';
+                return;
+            }
+            input.value = data.next;
+            hint.textContent = data.last
+                ? '✅ Last used: ' + data.last + '  →  Suggested next: ' + data.next
+                : 'No existing records for "' + prefix + '". Suggested: ' + data.next;
+            hint.classList.remove('hidden');
+        });
+    }
+
+    // ── On blur: auto-detect if the value is still just a prefix ─────────────
+    function autoDetectOnBlur(input) {
+        const val = input.value.trim();
+        if (!val) return;
+        // If it already ends with 3+ digits, assume a full control number — leave it alone
+        if (/\d{3,}$/.test(val)) return;
+        autoDetectControlNumber();
+    }
+
+    // ── Wand button / manual trigger ──────────────────────────────────────────
+    function autoDetectControlNumber() {
+        const input = document.getElementById('add_control_number');
+        const hint  = document.getElementById('ctrl_num_hint');
+        const current = input.value.trim();
+
+        if (!current) {
+            alert('Please type a prefix or pick one from the dropdown first.');
+            return;
+        }
+
+        // Strip trailing digits to get the alphabetic prefix
+        const prefix = current.replace(/\d+$/, '') || current;
+
+        const btn = document.querySelector('[onclick="autoDetectControlNumber()"]');
+        if (btn) { btn.disabled = true; btn.classList.add('opacity-50'); }
+        hint.textContent = '⏳ Looking up last used…';
+        hint.classList.remove('hidden');
+
+        fetchNextControlNumber(prefix, data => {
+            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+            if (!data || data.error) {
+                hint.textContent = '⚠️ ' + (data?.error || 'Could not fetch. Please enter manually.');
+                return;
+            }
+            if (data.next) {
+                input.value = data.next;
+                hint.textContent = data.last
+                    ? '✅ Last used: ' + data.last + '  →  Suggested next: ' + data.next
+                    : 'No existing records for "' + (data.prefix || prefix) + '". Suggested: ' + data.next;
+                hint.classList.remove('hidden');
+            }
+        });
+    }
 
     function openEditModal(item) {
         document.getElementById('edit_id').value = item.id;
@@ -2389,8 +2693,8 @@ if (!$is_ajax) {
         document.getElementById('edit_ms_office_email').value = item.ms_office_email || '';
         document.getElementById('edit_ip_address').value = item.ip_address || '';
         document.getElementById('edit_mac_address').value = item.mac_address || '';
-        document.getElementById('edit_endpoint_secure').value = item.endpoint_secure || 'N';
-        document.getElementById('edit_firewall').value = item.firewall || 'N';
+        document.getElementById('edit_endpoint_secure').value = item.endpoint_secure || '';
+        document.getElementById('edit_firewall').value = item.firewall || '';
         document.getElementById('edit_checked_by').value = item.checked_by || '';
         document.getElementById('edit_encoded_by').value = item.encoded_by || '';
         document.getElementById('edit_remarks').value = item.remarks || '';
@@ -2761,19 +3065,37 @@ if (!$is_ajax) {
             display: none !important;
         }
 
-        /* Reset overflow for containers to prevent cutoff */
+        /* Reset ALL overflow containers — catches overflow-y-auto and any flex containers */
+        *,
+        *::before,
+        *::after {
+            overflow: visible !important;
+            max-height: none !important;
+            height: auto !important;
+        }
+
+        /* Re-apply only what the table itself needs */
+        table {
+            height: unset !important;
+        }
+
+        /* Remove scrollable wrappers styling */
         .overflow-x-auto,
+        .overflow-y-auto,
         .overflow-hidden,
         .custom-scrollbar,
-        .rounded-2xl {
+        .rounded-2xl,
+        .flex-1 {
             overflow: visible !important;
             height: auto !important;
+            max-height: none !important;
             border-radius: 0 !important;
             box-shadow: none !important;
         }
 
         /* Show only main content */
-        body {
+        body,
+        html {
             background: white !important;
             height: auto !important;
             overflow: visible !important;
@@ -2793,14 +3115,16 @@ if (!$is_ajax) {
         table {
             width: 100% !important;
             border-collapse: collapse !important;
+            table-layout: auto !important;
         }
 
         th,
         td {
             border: 1px solid #ddd !important;
-            padding: 8px !important;
+            padding: 6px 8px !important;
             color: black !important;
             background: white !important;
+            white-space: normal !important;
         }
 
         th {
@@ -2812,8 +3136,68 @@ if (!$is_ajax) {
         tr:hover {
             background: transparent !important;
         }
+
+        /* Prevent rows from being split across page breaks */
+        tbody tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+        }
+
+        /* Repeat table header on every printed page */
+        thead {
+            display: table-header-group !important;
+        }
+
+        tbody {
+            display: table-row-group !important;
+        }
     }
 </style>
+
+<script>
+/* ── Print: strip overflow from every ancestor so page-break-inside works in Chrome ── */
+(function () {
+    var _saved = [];
+
+    function prepareForPrint() {
+        // Walk every element and strip overflow / max-height / height constraints
+        var all = document.querySelectorAll('*');
+        _saved = [];
+        all.forEach(function (el) {
+            var cs = window.getComputedStyle(el);
+            var ov = cs.overflow + cs.overflowX + cs.overflowY;
+            if (/auto|scroll|hidden/.test(ov) || el.style.overflow || el.style.overflowX || el.style.overflowY || el.style.maxHeight) {
+                _saved.push({
+                    el: el,
+                    overflow: el.style.overflow,
+                    overflowX: el.style.overflowX,
+                    overflowY: el.style.overflowY,
+                    maxHeight: el.style.maxHeight,
+                    height: el.style.height
+                });
+                el.style.overflow  = 'visible';
+                el.style.overflowX = 'visible';
+                el.style.overflowY = 'visible';
+                el.style.maxHeight = 'none';
+            }
+        });
+    }
+
+    function restoreAfterPrint() {
+        _saved.forEach(function (s) {
+            s.el.style.overflow  = s.overflow;
+            s.el.style.overflowX = s.overflowX;
+            s.el.style.overflowY = s.overflowY;
+            s.el.style.maxHeight = s.maxHeight;
+            s.el.style.height    = s.height;
+        });
+        _saved = [];
+    }
+
+    window.addEventListener('beforeprint', prepareForPrint);
+    window.addEventListener('afterprint',  restoreAfterPrint);
+})();
+</script>
 
 <!-- Multi-Select Dropdown Styles -->
 <style>

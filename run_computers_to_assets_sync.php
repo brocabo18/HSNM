@@ -33,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     ms_office, ms_office_licensed, antivirus, scan_date,
                     status, remarks, encoded_by, created_at, updated_at
                 )
-                SELECT 
+                SELECT DISTINCT ON (control_id)
                     COALESCE(NULLIF(TRIM(c.control_number), ''), 'JBL-TEMP-' || c.id) AS control_id,
                     c.department,
                     c.end_user,
@@ -69,6 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     c.created_at,
                     c.updated_at
                 FROM computers c
+                ORDER BY control_id, c.updated_at DESC NULLS LAST
                 ON CONFLICT (control_id) DO UPDATE SET
                     department = EXCLUDED.department,
                     end_user = EXCLUDED.end_user,

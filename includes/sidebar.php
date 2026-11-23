@@ -18,6 +18,10 @@ elseif (strpos($current_path, '/modules/ips') !== false)
     $active_page = 'ips';
 elseif (strpos($current_path, '/modules/outsourced') !== false)
     $active_page = 'outsourced';
+elseif (strpos($current_path, '/modules/supervisor_approval') !== false)
+    $active_page = 'supervisor_approval';
+elseif (strpos($current_path, '/modules/trash') !== false)
+    $active_page = 'trash';
 elseif (strpos($current_path, '/modules/computers') !== false)
     $active_page = 'computers';
 elseif (strpos($current_path, '/modules/jasmc_st') !== false)
@@ -133,6 +137,48 @@ elseif (strpos($current_path, '/modules/settings') !== false)
                 href="<?= BASE_URL ?>/modules/computers/">
                 <span class="material-symbols-outlined text-[17px]">computer</span>
                 <span class="text-xs font-medium">Computers</span>
+            </a>
+        <?php endif; ?>
+
+        <?php
+        // Supervisor Approval — admin/supervisor only
+        $sa_role = $_SESSION['role'] ?? '';
+        if (in_array($sa_role, ['admin', 'supervisor'])):
+            $sa_pending = 0;
+            try {
+                $sa_q = $pdo->query("SELECT COUNT(*) FROM pending_computers WHERE approval_status = 'Pending'");
+                $sa_pending = (int)$sa_q->fetchColumn();
+            } catch (Exception $sa_e) {}
+        ?>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'supervisor_approval' ? 'bg-amber-500/10 text-amber-500 font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/supervisor_approval/index.php"
+                title="Review and approve newly submitted computers">
+                <span class="material-symbols-outlined text-[15px]">verified_user</span>
+                <span class="text-xs font-medium">Supervisor Approval</span>
+                <?php if ($sa_pending > 0): ?>
+                    <span class="ml-auto text-[10px] font-bold bg-amber-500 text-white rounded-full px-1.5 py-0.5 leading-none"><?= $sa_pending ?></span>
+                <?php endif; ?>
+            </a>
+        <?php endif; ?>
+
+        <?php
+        // Trash — admin and editor
+        $tr_role = $_SESSION['role'] ?? '';
+        if (in_array($tr_role, ['admin', 'editor'])):
+            $trash_count = 0;
+            try {
+                $trash_q = $pdo->query("SELECT COUNT(*) FROM computers WHERE deleted_at IS NOT NULL");
+                $trash_count = (int)$trash_q->fetchColumn();
+            } catch (Exception $trash_e) {}
+        ?>
+            <a class="flex items-center gap-2.5 px-3 py-1.5 text-slate-600 dark:text-[#9da6b9] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1a2130] transition-colors rounded-lg ml-3 <?= $active_page === 'trash' ? 'bg-red-500/10 text-red-500 font-bold' : '' ?>"
+                href="<?= BASE_URL ?>/modules/trash/index.php"
+                title="Deleted computers — restore or permanently remove">
+                <span class="material-symbols-outlined text-[15px]">delete</span>
+                <span class="text-xs font-medium">Trash</span>
+                <?php if ($trash_count > 0): ?>
+                    <span class="ml-auto text-[10px] font-bold bg-red-500 text-white rounded-full px-1.5 py-0.5 leading-none"><?= $trash_count ?></span>
+                <?php endif; ?>
             </a>
         <?php endif; ?>
 

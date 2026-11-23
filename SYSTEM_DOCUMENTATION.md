@@ -1,7 +1,7 @@
 # Hardware & Security Network Management (HSNM)
 ## Comprehensive System Technical Documentation & Manual
-**Version:** v1.15.6  
-**Last Updated:** November 11, 2026  
+**Version:** v1.16.0  
+**Last Updated:** November 23, 2026  
 **Primary Maintainer / Author:** IHOMS-MIKE  
 **Target Environment:** Local Intranet (`http://ihoms/HSNM` / `192.163.10.11`) & Neon Cloud Failover
 
@@ -28,7 +28,7 @@
 6. [Complete Database Schema & Data Dictionary](#6-complete-database-schema--data-dictionary)
 7. [Network Topology, DNS Proxy & VirtualHost Setup](#7-network-topology-dns-proxy--virtualhost-setup)
 8. [Database Cloud Synchronization 2.0 & Disaster Recovery](#8-database-cloud-synchronization-20--disaster-recovery)
-9. [Chronological Revision History (v1.0.0 – v1.15.6)](#9-chronological-revision-history-v100--v1156)
+9. [Chronological Revision History (v1.0.0 – v1.15.6)](#9-chronological-revision-history-v100--v1160)
 10. [System Administration & Operational Runbook](#10-system-administration--operational-runbook)
 
 ---
@@ -364,8 +364,43 @@ An automated audit tool comparing the **IP Address Inventory** against the **Com
 ### 5.11 Reporting, Auditing, Changelog & User Settings
 - **`reports`**: Cross-tabulation reports grouped by department, building, floor, hardware specifications, and lifecycle statuses.
 - **`logs`**: Central activity log with category filters (User, IP, Computer, Reconciliation, System) and export tools.
-- **`changelog`**: Automated code change detector using MD5 checksums, paired with a version history timeline displaying current system revision (`v1.15.6`).
+- **`changelog`**: Automated code change detector using MD5 checksums, paired with a version history timeline displaying current system revision (`v1.16.0`).
 - **`settings`**: User account management, password resets, role assignment (`Admin`, `Editor`, `Viewer`), and JSONB permission checkboxes.
+
+### 5.12 Supervisor Approval Queue (`/modules/supervisor_approval/`)
+
+The Supervisor Approval Queue enforces a **four-eyes principle** for all new computer submissions. Access is restricted to users with the **Admin** or **Supervisor** role.
+
+**Workflow:**
+1. Any user submits a new computer via the Add Computer modal; the submission is written to the `pending_computers` staging table (not `computers`), with `approval_status = 'Pending'`.
+2. An admin/supervisor opens the Supervisor Approval Queue module from the sidebar (amber badge shows pending count).
+3. The reviewer inspects all submitted fields, then either:
+   - **Approves** — the row is promoted to the `computers` table, `firewall_status` is synced, `syncComputerToAsset()` and `syncComputerIpToIpModule()` are called automatically.
+   - **Rejects** — `approval_status` is set to `'Rejected'` and a mandatory review note is recorded on the pending row.
+
+**Key Implementation Details:**
+- `pending_computers` table mirrors all 46 columns of `computers` plus `approval_status` (`Pending`/`Approved`/`Rejected`), `reviewed_by`, `reviewed_at`, and `review_note`.
+- SQL migration: `database/add_supervisor_approval.sql`.
+- Access bypass for `canAccessModule()` is implemented in `includes/header.php` (special-case whitelist).
+- Sidebar amber badge: live count of rows where `approval_status = 'Pending'`.
+- The **Confirmed-by-Supervisor** dropdown in the Add modal is populated exclusively from users with `role = 'admin'`; non-admin users do not see this field.
+
+### 5.13 Trash / Recycle Bin (`/modules/trash/`)
+
+The Trash module implements **soft-delete** semantics across the Computer Inventory, giving administrators and editors a safety net before permanent deletion.
+
+**Workflow:**
+- **Delete (Computers module):** Instead of a hard `DELETE`, the system sets `deleted_at = NOW()` and `deleted_by = <username>` on the row. The record is immediately hidden from all inventory queries, exports, duplicate checks, and auto-detect lookups (`WHERE deleted_at IS NULL`).
+- **Trash Module:** Lists all soft-deleted computers grouped by deletion date. Each row shows the computer's full details plus who deleted it and when.
+- **Restore:** Clears `deleted_at` / `deleted_by`, re-syncs the IP module (`syncComputerIpToIpModule()`), and re-syncs the asset registry (`syncComputerToAsset()`). The record re-appears in the main inventory instantly.
+- **Permanent Delete (Admin only):** Issues a hard `DELETE FROM computers` — irreversible. Logs the action to `trash_log`.
+- **Bulk Actions:** *Restore All* and *Empty Trash* (admin only) operate on all soft-deleted rows in a single transaction.
+
+**Key Implementation Details:**
+- SQL migration: `database/add_trash_module.sql` — adds `deleted_at TIMESTAMPTZ`, `deleted_by VARCHAR(100)` to `computers`; creates `trash_log` table (JSONB row snapshot per action).
+- Access restricted to `admin` and `editor` roles via `header.php` special-case bypass.
+- Sidebar red badge: live count of rows where `deleted_at IS NOT NULL`.
+- `trash_log` stores full JSONB row snapshots for each trash/restore/permanent-delete action, enabling forensic audit trails.
 
 ---
 
@@ -397,6 +432,8 @@ An automated audit tool comparing the **IP Address Inventory** against the **Com
 | `ihoms_links` | Internal System Bookmarks | `id` |
 | `users` | User Accounts & RBAC Permissions | `username` |
 | `audit_logs` | System Activity & Audit Trail | `id` |
+| `pending_computers` | Supervisor Approval Staging Queue | `id`, `control_number` |
+| `trash_log` | Soft-Delete Forensic Audit Trail (JSONB snapshots) | `id` |
 
 ---
 
@@ -485,10 +522,11 @@ flowchart LR
 
 ---
 
-## 9. Chronological Revision History (v1.0.0 – v1.15.6)
+## 9. Chronological Revision History (v1.0.0 – v1.16.0)
 
 | Version | Date | Module | Type | Technical Summary |
 |---|---|---|---|---|
+| **v1.16.0** | 2026-11-23 | Computer Inventory / New Modules | `feature` / `security` / `fix` | **Supervisor Approval Workflow, Trash/Recycle Bin, Smart Control Number Auto-Detect & Security Hardening:** Added `modules/supervisor_approval/` — pending queue where new computer submissions await admin/supervisor review before entering `computers` table. `pending_computers` table (40 columns) created via SQL migration. Added `modules/trash/` — soft-delete recycle bin with restore, permanent delete, and empty trash bulk actions. `computers.deleted_at`/`deleted_by` columns added; all SELECTs, exports, and duplicate checks exclude soft-deleted rows. Add Computer modal redesigned: Supervisor Confirmation section (admin-only dropdown + required checkbox), Endpoint Secure/Firewall changed to `-- Select Yes/No --` required placeholder. Control Number auto-detect rebuilt: prefix dropdown (53 JBL prefixes), on-blur auto-fill, wand button; regex fixed for alphanumeric suffixes (e.g. `JBL-PHAR-PC025`→`PC026`). `includes/header.php` special-case bypass for `supervisor_approval` and `trash` modules. Sidebar amber/red badges for pending approvals and trashed items. |
 | **v1.15.6** | 2026-11-11 | Outsourced Modules & Fixes | `feature` / `fix` | **Outsourced Inventory Modules, Filter UX & MAC Normalization:** Added `modules/outsourced/` (Outsourced Computer Inventory) and `modules/ips_outsourced/` (Outsourced IP Inventory) — both filter the existing `computers`/`ips` tables by `control_number LIKE 'JBL-OS-%'` with no new DB tables. Violet UI, `handshake` icon, `enforceOsPrefix()` / `enforceIpOsPrefix()` client+server prefix enforcement, scoped Excel/CSV exports. Added "Outsourced" tab to both switcher tab bars and "Outsourced IPs" sidebar link. Fixed filter dropdown auto-submit (`onchange="this.form.submit()"`) in JASMC-ST, JASMC-VT, DOH-JBL-CMC satellite modules. Fixed MAC address search to normalize `:` → `-` before querying. |
 | **v1.15.5** | 2026-11-11 | Satellites & Core | `feature` | **Multi-Facility Satellite IP Inventories & Resilient Sync:** Added dedicated Satellite IP Address Management modules (`ips_jasmc_st`, `ips_jasmc_vt`, `ips_doh_jbl_cmc`) with shared template architecture and top switcher tabs. Implemented query-isolated dashboard metrics (`$safeCount`, `$safeSum`) in `index.php` preventing schema drift from zeroing metrics. Upgraded `sync_neon.php` to Sync Engine 2.0 with dynamic table discovery, column intersection, and unique constraint resolution across all 22 system tables. Added self-hosted offline fonts (Inter, Material Symbols WOFF2) and local Tailwind JS bundle. Implemented printable official PM checklists and Asset inventory sheets. Added `'Maintenance'` status option. |
 | **v1.15.4** | 2026-10-28 | Asset Management | `feature` | **Computers to Assets & Maintenance One-Click Migration Runner:** Created interactive web migration utility (`run_computers_to_assets_sync.php`) accessible directly from Asset Inventory header before Export Excel. Executes conflict-safe upsert of 872 workstations into `assets` and seeds 574 historical PMS audit logs into `maintenance` with dual foreign key linkage. Added real-time `syncComputerToAsset()` hooks on computer additions/updates. |
