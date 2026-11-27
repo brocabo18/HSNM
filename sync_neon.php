@@ -34,7 +34,7 @@ function createRemotePdo($neonUrl) {
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES   => true,
-                PDO::ATTR_TIMEOUT            => 10
+                PDO::ATTR_TIMEOUT            => 30
             ]);
             $remotePdo->exec("SET search_path TO public;");
             return $remotePdo;
@@ -120,11 +120,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'test'
 
 // ── Handle AJAX Sync request ─────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'sync') {
+    // Increase limits for large sync operations over SSL
+    @set_time_limit(300);
+    @ini_set('memory_limit', '512M');
+
+    // Capture any stray output (PHP warnings/notices) so they don't corrupt JSON
+    ob_start();
+
+    // Shutdown handler: if PHP dies mid-sync, still return valid JSON
+    register_shutdown_function(function() {
+        $err = error_get_last();
+        if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+            ob_end_clean();
+            if (!headers_sent()) {
+                header('Content-Type: application/json');
+            }
+            echo json_encode([
+                'success' => false,
+                'error'   => 'PHP Fatal Error: ' . $err['message'] . ' in ' . basename($err['file']) . ' line ' . $err['line']
+            ]);
+        }
+    });
+
     header('Content-Type: application/json');
     $neonUrl = $_POST['neon_url'] ?? '';
     $allowDeletes = !empty($_POST['allow_deletes']);
 
     if (empty($neonUrl)) {
+        ob_end_clean();
         echo json_encode(['success' => false, 'error' => 'Remote connection string is required.']);
         exit;
     }
@@ -132,6 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'sync'
     try {
         $remotePdo = createRemotePdo($neonUrl);
     } catch (Exception $e) {
+        ob_end_clean();
         echo json_encode(['success' => false, 'error' => 'Connection to Remote DB failed: ' . $e->getMessage()]);
         exit;
     }
@@ -429,6 +453,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'sync'
     try { $pdo->exec("SET session_replication_role = 'origin';"); } catch (Exception $e) {}
 
     $logs[] = "🎉 Sync completed!";
+    ob_end_clean(); // discard any stray PHP warnings before sending JSON
     echo json_encode(['success' => true, 'logs' => $logs]);
     exit;
 }
